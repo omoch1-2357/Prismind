@@ -8,8 +8,8 @@ Phase 1の基礎実装を、BitBoard盤面表現からパターン評価シス�
 
 ## タスクリスト
 
-- [ ] 1. プロジェクト初期化とコア型定義
-- [ ] 1.1 (P) Cargoプロジェクト作成と依存関係設定
+- [x] 1. プロジェクト初期化とコア型定義
+- [x] 1.1 (P) Cargoプロジェクト作成と依存関係設定
   - Cargo.tomlでRust 1.70+プロジェクト初期化
   - csv、serde、thiserror、criterionクレートを追加
   - リリースビルド最適化設定（opt-level=3、lto="fat"）
@@ -17,7 +17,7 @@ Phase 1の基礎実装を、BitBoard盤面表現からパターン評価シス�
   - ARM64とx86_64の互換性確認
   - _Requirements: 13.3, 13.5, NFR-2, 16.1, 16.2_
 
-- [ ] 1.2 (P) BitBoard構造体とColor列挙型の定義
+- [x] 1.2 (P) BitBoard構造体とColor列挙型の定義
   - BitBoard構造体を#[repr(C, align(8))]で定義
   - black、white（各u64）、turn（Color）、move_count（u8）フィールド
   - Color列挙型をBlack/White値で定義し、opposite()メソッド実装
@@ -25,7 +25,7 @@ Phase 1の基礎実装を、BitBoard盤面表現からパターン評価シス�
   - メモリサイズが16バイト以内であることを確認
   - _Requirements: 1.1, 1.2, 13.1, 1.6_
 
-- [ ] 1.3 (P) BitBoard初期化と基本操作
+- [x] 1.3 (P) BitBoard初期化と基本操作
   - BitBoard::new()で初期盤面（D4白、E4黒、D5黒、E5白）を設定
   - current_player()とopponent()メソッドでビットマスク取得
   - flip()メソッドで白黒反転を実装
