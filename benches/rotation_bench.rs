@@ -4,25 +4,19 @@ use prismind::board::BitBoard;
 fn bench_rotate_90(c: &mut Criterion) {
     let board = BitBoard::new();
 
-    c.bench_function("rotate_90", |b| {
-        b.iter(|| black_box(board.rotate_90()))
-    });
+    c.bench_function("rotate_90", |b| b.iter(|| black_box(board.rotate_90())));
 }
 
 fn bench_rotate_180(c: &mut Criterion) {
     let board = BitBoard::new();
 
-    c.bench_function("rotate_180", |b| {
-        b.iter(|| black_box(board.rotate_180()))
-    });
+    c.bench_function("rotate_180", |b| b.iter(|| black_box(board.rotate_180())));
 }
 
 fn bench_rotate_270(c: &mut Criterion) {
     let board = BitBoard::new();
 
-    c.bench_function("rotate_270", |b| {
-        b.iter(|| black_box(board.rotate_270()))
-    });
+    c.bench_function("rotate_270", |b| b.iter(|| black_box(board.rotate_270())));
 }
 
 fn bench_four_rotations(c: &mut Criterion) {

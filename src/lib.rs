@@ -31,7 +31,7 @@ mod tests {
         // Clone, Copy, Debug, PartialEq, Eqトレイトが実装されていること
         let board1 = BitBoard::new();
         let board2 = board1; // Copy
-        let board3 = board1.clone(); // Clone
+        let board3 = board1;
 
         assert_eq!(board1, board2); // PartialEq
         assert_eq!(board2, board3); // Eq

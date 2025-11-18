@@ -77,12 +77,12 @@ impl BitBoard {
     pub fn new() -> Self {
         // 初期配置: D4白(27)、E4黒(28)、D5黒(35)、E5白(36)
         // A1=0, B1=1, ..., H8=63（行優先）
-        let black = (1u64 << 28) | (1u64 << 35);  // E4, D5
-        let white_stones = (1u64 << 27) | (1u64 << 36);  // D4, E5
+        let black = (1u64 << 28) | (1u64 << 35); // E4, D5
+        let white_stones = (1u64 << 27) | (1u64 << 36); // D4, E5
 
         Self {
             black,
-            white: white_stones,  // 手番=Black(0), move_count=0がデフォルトで0
+            white: white_stones, // 手番=Black(0), move_count=0がデフォルトで0
         }
     }
 
@@ -305,7 +305,7 @@ mod tests {
     fn test_bitboard_default_traits() {
         let board1 = BitBoard::new();
         let board2 = board1; // Copy
-        let board3 = board1.clone(); // Clone
+        let board3 = board1;
 
         assert_eq!(board1, board2); // PartialEq, Eq
         assert_eq!(board2, board3);
@@ -380,7 +380,10 @@ mod tests {
 
         // Verify stone count is preserved
         assert_eq!(board.black.count_ones(), rotated.black.count_ones());
-        assert_eq!(board.white_mask().count_ones(), rotated.white_mask().count_ones());
+        assert_eq!(
+            board.white_mask().count_ones(),
+            rotated.white_mask().count_ones()
+        );
     }
 
     #[test]
@@ -392,12 +395,22 @@ mod tests {
 
         // Verify stone count is preserved
         assert_eq!(board.black.count_ones(), rotated.black.count_ones());
-        assert_eq!(board.white_mask().count_ones(), rotated.white_mask().count_ones());
+        assert_eq!(
+            board.white_mask().count_ones(),
+            rotated.white_mask().count_ones()
+        );
 
         // Initial board is symmetric under 180° rotation
         // D4(27) ↔ E5(36), E4(28) ↔ D5(35)
-        assert_eq!(rotated.black, board.black, "Initial board is symmetric under 180° rotation");
-        assert_eq!(rotated.white_mask(), board.white_mask(), "Initial board is symmetric under 180° rotation");
+        assert_eq!(
+            rotated.black, board.black,
+            "Initial board is symmetric under 180° rotation"
+        );
+        assert_eq!(
+            rotated.white_mask(),
+            board.white_mask(),
+            "Initial board is symmetric under 180° rotation"
+        );
     }
 
     #[test]
@@ -409,7 +422,10 @@ mod tests {
 
         // Verify stone count is preserved
         assert_eq!(board.black.count_ones(), rotated.black.count_ones());
-        assert_eq!(board.white_mask().count_ones(), rotated.white_mask().count_ones());
+        assert_eq!(
+            board.white_mask().count_ones(),
+            rotated.white_mask().count_ones()
+        );
     }
 
     #[test]
@@ -422,13 +438,22 @@ mod tests {
         let rot270 = board.rotate_270();
 
         assert_eq!(board.black.count_ones(), rot90.black.count_ones());
-        assert_eq!(board.white_mask().count_ones(), rot90.white_mask().count_ones());
+        assert_eq!(
+            board.white_mask().count_ones(),
+            rot90.white_mask().count_ones()
+        );
 
         assert_eq!(board.black.count_ones(), rot180.black.count_ones());
-        assert_eq!(board.white_mask().count_ones(), rot180.white_mask().count_ones());
+        assert_eq!(
+            board.white_mask().count_ones(),
+            rot180.white_mask().count_ones()
+        );
 
         assert_eq!(board.black.count_ones(), rot270.black.count_ones());
-        assert_eq!(board.white_mask().count_ones(), rot270.white_mask().count_ones());
+        assert_eq!(
+            board.white_mask().count_ones(),
+            rot270.white_mask().count_ones()
+        );
     }
 
     #[test]
@@ -441,8 +466,15 @@ mod tests {
         let rot270 = rot180.rotate_90();
         let rot360 = rot270.rotate_90();
 
-        assert_eq!(board.black, rot360.black, "Four rotations should return black stones to original");
-        assert_eq!(board.white_mask(), rot360.white_mask(), "Four rotations should return white stones to original");
+        assert_eq!(
+            board.black, rot360.black,
+            "Four rotations should return black stones to original"
+        );
+        assert_eq!(
+            board.white_mask(),
+            rot360.white_mask(),
+            "Four rotations should return white stones to original"
+        );
     }
 
     #[test]
@@ -470,7 +502,7 @@ mod tests {
         // Use rows 2-7 (bits 8-55) to avoid metadata conflicts
         let board = BitBoard {
             black: 0x0000_0000_0000_FF00, // Row 2 (A2-H2)
-            white: 0x00FF_0000_0000_0000 | (TURN_MASK & 0) | (MOVE_COUNT_MASK & 0), // Row 7 (A7-H7)
+            white: 0x00FF_0000_0000_0000, // Row 7 (A7-H7)
         };
 
         let rot180 = board.rotate_180();
@@ -481,6 +513,9 @@ mod tests {
         // So we need to check black stones went to where white was, and vice versa
         assert_eq!(rot180.black.count_ones(), board.black.count_ones());
         // White stones from row 7 will rotate to row 2 (bits 8-15), which are safe
-        assert_eq!(rot180.white_mask().count_ones(), board.white_mask().count_ones());
+        assert_eq!(
+            rot180.white_mask().count_ones(),
+            board.white_mask().count_ones()
+        );
     }
 }
