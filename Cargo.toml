@@ -28,3 +28,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "prismind"
 path = "src/main.rs"
+
+[[bench]]
+name = "rotation_bench"
+harness = false

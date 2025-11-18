@@ -149,6 +149,134 @@ impl BitBoard {
             white: self.black | turn | move_count,
         }
     }
+
+    /// Rotate bitboard 90 degrees counter-clockwise
+    ///
+    /// Transformation: (row, col) → (col, 7-row)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use prismind::board::BitBoard;
+    ///
+    /// let board = BitBoard::new();
+    /// let rotated = board.rotate_90();
+    /// assert_eq!(board.black.count_ones(), rotated.black.count_ones());
+    /// ```
+    pub fn rotate_90(&self) -> Self {
+        let rotated_black = rotate_bits_90(self.black);
+        let rotated_white_stones = rotate_bits_90(self.white_mask());
+
+        // Clear lower 8 bits from rotated white stones, then add metadata
+        let metadata = self.white & (TURN_MASK | MOVE_COUNT_MASK);
+        let rotated_white = (rotated_white_stones & WHITE_MASK) | metadata;
+
+        Self {
+            black: rotated_black,
+            white: rotated_white,
+        }
+    }
+
+    /// Rotate bitboard 180 degrees
+    ///
+    /// Uses ARM64 REV instruction via reverse_bits() for optimal performance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use prismind::board::BitBoard;
+    ///
+    /// let board = BitBoard::new();
+    /// let rotated = board.rotate_180();
+    /// assert_eq!(board.black.count_ones(), rotated.black.count_ones());
+    /// ```
+    #[inline]
+    pub fn rotate_180(&self) -> Self {
+        let rotated_black = self.black.reverse_bits();
+        let rotated_white_stones = self.white_mask().reverse_bits();
+
+        // Clear lower 8 bits from rotated white stones, then add metadata
+        let metadata = self.white & (TURN_MASK | MOVE_COUNT_MASK);
+        let rotated_white = (rotated_white_stones & WHITE_MASK) | metadata;
+
+        Self {
+            black: rotated_black,
+            white: rotated_white,
+        }
+    }
+
+    /// Rotate bitboard 270 degrees counter-clockwise
+    ///
+    /// Transformation: (row, col) → (7-col, row)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use prismind::board::BitBoard;
+    ///
+    /// let board = BitBoard::new();
+    /// let rotated = board.rotate_270();
+    /// assert_eq!(board.black.count_ones(), rotated.black.count_ones());
+    /// ```
+    pub fn rotate_270(&self) -> Self {
+        let rotated_black = rotate_bits_270(self.black);
+        let rotated_white_stones = rotate_bits_270(self.white_mask());
+
+        // Clear lower 8 bits from rotated white stones, then add metadata
+        let metadata = self.white & (TURN_MASK | MOVE_COUNT_MASK);
+        let rotated_white = (rotated_white_stones & WHITE_MASK) | metadata;
+
+        Self {
+            black: rotated_black,
+            white: rotated_white,
+        }
+    }
+}
+
+/// Rotate a 64-bit bitboard 90 degrees counter-clockwise
+///
+/// Transformation: (row, col) → (col, 7-row)
+/// For bit position: old_bit = row * 8 + col
+///                  new_bit = col * 8 + (7 - row)
+#[inline]
+fn rotate_bits_90(bits: u64) -> u64 {
+    let mut result = 0u64;
+
+    for bit_pos in 0..64 {
+        if (bits & (1u64 << bit_pos)) != 0 {
+            let row = bit_pos / 8;
+            let col = bit_pos % 8;
+            let new_row = col;
+            let new_col = 7 - row;
+            let new_pos = new_row * 8 + new_col;
+            result |= 1u64 << new_pos;
+        }
+    }
+
+    result
+}
+
+/// Rotate a 64-bit bitboard 270 degrees counter-clockwise
+///
+/// Transformation: (row, col) → (7-col, row)
+/// For bit position: old_bit = row * 8 + col
+///                  new_bit = (7 - col) * 8 + row
+#[inline]
+fn rotate_bits_270(bits: u64) -> u64 {
+    let mut result = 0u64;
+
+    for bit_pos in 0..64 {
+        if (bits & (1u64 << bit_pos)) != 0 {
+            let row = bit_pos / 8;
+            let col = bit_pos % 8;
+            let new_row = 7 - col;
+            let new_col = row;
+            let new_pos = new_row * 8 + new_col;
+            result |= 1u64 << new_pos;
+        }
+    }
+
+    result
 }
 
 impl Default for BitBoard {
@@ -239,5 +367,120 @@ mod tests {
 
         // 手数は保持される
         assert_eq!(flipped.move_count(), board.move_count());
+    }
+
+    // ========== Task 2.1: Rotation Tests ==========
+
+    #[test]
+    fn test_rotate_90() {
+        // Test 90-degree rotation with the initial board configuration
+        let board = BitBoard::new(); // D4 white, E4 black, D5 black, E5 white
+
+        let rotated = board.rotate_90();
+
+        // Verify stone count is preserved
+        assert_eq!(board.black.count_ones(), rotated.black.count_ones());
+        assert_eq!(board.white_mask().count_ones(), rotated.white_mask().count_ones());
+    }
+
+    #[test]
+    fn test_rotate_180() {
+        // Test 180° rotation with the initial board configuration
+        let board = BitBoard::new();
+
+        let rotated = board.rotate_180();
+
+        // Verify stone count is preserved
+        assert_eq!(board.black.count_ones(), rotated.black.count_ones());
+        assert_eq!(board.white_mask().count_ones(), rotated.white_mask().count_ones());
+
+        // Initial board is symmetric under 180° rotation
+        // D4(27) ↔ E5(36), E4(28) ↔ D5(35)
+        assert_eq!(rotated.black, board.black, "Initial board is symmetric under 180° rotation");
+        assert_eq!(rotated.white_mask(), board.white_mask(), "Initial board is symmetric under 180° rotation");
+    }
+
+    #[test]
+    fn test_rotate_270() {
+        // Test 270-degree counter-clockwise rotation
+        let board = BitBoard::new();
+
+        let rotated = board.rotate_270();
+
+        // Verify stone count is preserved
+        assert_eq!(board.black.count_ones(), rotated.black.count_ones());
+        assert_eq!(board.white_mask().count_ones(), rotated.white_mask().count_ones());
+    }
+
+    #[test]
+    fn test_rotation_preserves_stone_count() {
+        // Rotation should preserve the number of stones
+        let board = BitBoard::new();
+
+        let rot90 = board.rotate_90();
+        let rot180 = board.rotate_180();
+        let rot270 = board.rotate_270();
+
+        assert_eq!(board.black.count_ones(), rot90.black.count_ones());
+        assert_eq!(board.white_mask().count_ones(), rot90.white_mask().count_ones());
+
+        assert_eq!(board.black.count_ones(), rot180.black.count_ones());
+        assert_eq!(board.white_mask().count_ones(), rot180.white_mask().count_ones());
+
+        assert_eq!(board.black.count_ones(), rot270.black.count_ones());
+        assert_eq!(board.white_mask().count_ones(), rot270.white_mask().count_ones());
+    }
+
+    #[test]
+    fn test_four_rotations_return_to_original() {
+        // Four 90-degree rotations should return to the original board
+        let board = BitBoard::new();
+
+        let rot90 = board.rotate_90();
+        let rot180 = rot90.rotate_90();
+        let rot270 = rot180.rotate_90();
+        let rot360 = rot270.rotate_90();
+
+        assert_eq!(board.black, rot360.black, "Four rotations should return black stones to original");
+        assert_eq!(board.white_mask(), rot360.white_mask(), "Four rotations should return white stones to original");
+    }
+
+    #[test]
+    fn test_rotation_preserves_game_state() {
+        // Rotation should preserve turn and move_count
+        let board = BitBoard::new();
+
+        let rot90 = board.rotate_90();
+        let rot180 = board.rotate_180();
+        let rot270 = board.rotate_270();
+
+        assert_eq!(board.turn(), rot90.turn());
+        assert_eq!(board.move_count(), rot90.move_count());
+
+        assert_eq!(board.turn(), rot180.turn());
+        assert_eq!(board.move_count(), rot180.move_count());
+
+        assert_eq!(board.turn(), rot270.turn());
+        assert_eq!(board.move_count(), rot270.move_count());
+    }
+
+    #[test]
+    fn test_rotation_with_complex_pattern() {
+        // Test with a more complex stone pattern
+        // Use rows 2-7 (bits 8-55) to avoid metadata conflicts
+        let board = BitBoard {
+            black: 0x0000_0000_0000_FF00, // Row 2 (A2-H2)
+            white: 0x00FF_0000_0000_0000 | (TURN_MASK & 0) | (MOVE_COUNT_MASK & 0), // Row 7 (A7-H7)
+        };
+
+        let rot180 = board.rotate_180();
+
+        // After 180° rotation, row 2 and row 7 should swap (with bit reversal)
+        // Row 2 (bits 8-15) reverses to bits 48-55 (row 6)
+        // Row 7 (bits 48-55) reverses to bits 8-15 (row 2), but gets masked out for white!
+        // So we need to check black stones went to where white was, and vice versa
+        assert_eq!(rot180.black.count_ones(), board.black.count_ones());
+        // White stones from row 7 will rotate to row 2 (bits 8-15), which are safe
+        assert_eq!(rot180.white_mask().count_ones(), board.white_mask().count_ones());
     }
 }
