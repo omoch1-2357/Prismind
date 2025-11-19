@@ -44,3 +44,7 @@ harness = false
 [[bench]]
 name = "extract_patterns_bench"
 harness = false
+
+[[bench]]
+name = "score_conversion_bench"
+harness = false

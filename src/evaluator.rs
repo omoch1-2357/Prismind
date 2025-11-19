@@ -5,6 +5,141 @@
 
 use crate::pattern::Pattern;
 
+/// u16型の評価値をf32型の石差に変換
+///
+/// # 変換式
+///
+/// `(value - 32768.0) / 256.0`
+///
+/// # マッピング
+///
+/// - u16値0 → 石差-128.0
+/// - u16値32768 → 石差0.0
+/// - u16値65535 → 石差+127.996
+///
+/// # Arguments
+///
+/// * `value` - u16型の評価値
+///
+/// # Returns
+///
+/// f32型の石差（負の値は白優勢、正の値は黒優勢）
+///
+/// # Examples
+///
+/// ```
+/// use prismind::evaluator::u16_to_score;
+///
+/// assert_eq!(u16_to_score(0), -128.0);
+/// assert_eq!(u16_to_score(32768), 0.0);
+/// ```
+#[inline]
+pub fn u16_to_score(value: u16) -> f32 {
+    (value as f32 - 32768.0) / 256.0
+}
+
+/// f32型の石差をu16型の評価値に変換
+///
+/// # 変換式
+///
+/// `clamp(score × 256.0 + 32768.0, 0.0, 65535.0) as u16`
+///
+/// # マッピング
+///
+/// - 石差-128.0 → u16値0
+/// - 石差0.0 → u16値32768
+/// - 石差+127.996 → u16値65535
+///
+/// 範囲外の値は自動的にクランプされる。
+///
+/// # Arguments
+///
+/// * `score` - f32型の石差
+///
+/// # Returns
+///
+/// u16型の評価値（0-65535）
+///
+/// # Examples
+///
+/// ```
+/// use prismind::evaluator::score_to_u16;
+///
+/// assert_eq!(score_to_u16(-128.0), 0);
+/// assert_eq!(score_to_u16(0.0), 32768);
+/// assert_eq!(score_to_u16(200.0), 65535); // クランプされる
+/// ```
+#[inline]
+pub fn score_to_u16(score: f32) -> u16 {
+    let raw = score * 256.0 + 32768.0;
+    raw.clamp(0.0, 65535.0) as u16
+}
+
+/// ARM NEON SIMDを使用してu16型の評価値8個をf32型の石差に一括変換
+///
+/// # 変換式
+///
+/// 各要素について `(value - 32768.0) / 256.0` を並列実行
+///
+/// # Arguments
+///
+/// * `values` - u16型の評価値8個の配列
+///
+/// # Returns
+///
+/// f32型の石差8個の配列
+///
+/// # Platform Support
+///
+/// この関数はARM64 (aarch64) アーキテクチャでのみ利用可能。
+/// 他のプラットフォームでは利用できない。
+///
+/// # Examples
+///
+/// ```ignore
+/// #[cfg(target_arch = "aarch64")]
+/// use prismind::evaluator::u16_to_score_simd;
+///
+/// #[cfg(target_arch = "aarch64")]
+/// {
+///     let values: [u16; 8] = [0, 10000, 20000, 32768, 40000, 50000, 60000, 65535];
+///     let scores = u16_to_score_simd(&values);
+///     assert_eq!(scores[0], -128.0);
+///     assert_eq!(scores[3], 0.0);
+/// }
+/// ```
+#[cfg(target_arch = "aarch64")]
+#[inline]
+pub fn u16_to_score_simd(values: &[u16; 8]) -> [f32; 8] {
+    use std::arch::aarch64::*;
+
+    unsafe {
+        // u16の8個をロード
+        let v = vld1q_u16(values.as_ptr());
+
+        // 下位4個をu32に拡張してからf32に変換
+        let v_low_u32 = vmovl_u16(vget_low_u16(v));
+        let v_low_f32 = vcvtq_f32_u32(v_low_u32);
+
+        // 上位4個をu32に拡張してからf32に変換
+        let v_high_u32 = vmovl_u16(vget_high_u16(v));
+        let v_high_f32 = vcvtq_f32_u32(v_high_u32);
+
+        // (value - 32768.0) / 256.0 の計算
+        let offset = vdupq_n_f32(32768.0);
+        let scale = vdupq_n_f32(1.0 / 256.0);
+
+        let result_low = vmulq_f32(vsubq_f32(v_low_f32, offset), scale);
+        let result_high = vmulq_f32(vsubq_f32(v_high_f32, offset), scale);
+
+        // 結果を配列に格納
+        let mut out = [0.0f32; 8];
+        vst1q_f32(out.as_mut_ptr(), result_low);
+        vst1q_f32(out.as_mut_ptr().add(4), result_high);
+        out
+    }
+}
+
 /// 評価テーブル（Structure of Arrays形式）
 ///
 /// # メモリレイアウト
@@ -496,5 +631,277 @@ mod tests {
         println!("✓ 9.7: pattern_offsets array manages start positions");
 
         println!("=== All Task 8 requirements verified ===");
+    }
+
+    // ========== Task 9.1: u16とf32の相互変換 Tests (TDD - RED) ==========
+
+    #[test]
+    fn test_u16_to_score_zero() {
+        // Requirement 10.3: u16値0を石差-128.0にマッピング
+        let score = u16_to_score(0);
+        assert_eq!(score, -128.0, "u16 value 0 should map to stone diff -128.0");
+    }
+
+    #[test]
+    fn test_u16_to_score_neutral() {
+        // Requirement 10.4: u16値32768を石差0.0にマッピング
+        let score = u16_to_score(32768);
+        assert_eq!(score, 0.0, "u16 value 32768 should map to stone diff 0.0");
+    }
+
+    #[test]
+    fn test_u16_to_score_max() {
+        // Requirement 10.5: u16値65535を石差+127.996にマッピング
+        let score = u16_to_score(65535);
+        let expected = 127.996_09; // (65535 - 32768.0) / 256.0
+        assert!(
+            (score - expected).abs() < 0.0001,
+            "u16 value 65535 should map to approximately +127.996, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_u16_to_score_formula() {
+        // Requirement 10.1: (value - 32768.0) / 256.0 の式を使用
+        let test_values = [0, 1000, 16384, 32768, 49152, 60000, 65535];
+
+        for value in test_values {
+            let score = u16_to_score(value);
+            let expected = (value as f32 - 32768.0) / 256.0;
+            assert!(
+                (score - expected).abs() < 0.0001,
+                "u16_to_score({}) should return {}, got {}",
+                value,
+                expected,
+                score
+            );
+        }
+    }
+
+    #[test]
+    fn test_score_to_u16_min() {
+        // Requirement 10.2, 10.3: 範囲外の値に対するclamp動作
+        let u16_val = score_to_u16(-128.0);
+        assert_eq!(u16_val, 0, "Stone diff -128.0 should map to u16 value 0");
+
+        // さらに小さい値もクランプされる
+        let u16_val_below = score_to_u16(-200.0);
+        assert_eq!(
+            u16_val_below, 0,
+            "Stone diff below -128.0 should clamp to u16 value 0"
+        );
+    }
+
+    #[test]
+    fn test_score_to_u16_neutral() {
+        // Requirement 10.4: 石差0.0をu16値32768にマッピング
+        let u16_val = score_to_u16(0.0);
+        assert_eq!(
+            u16_val, 32768,
+            "Stone diff 0.0 should map to u16 value 32768"
+        );
+    }
+
+    #[test]
+    fn test_score_to_u16_max() {
+        // Requirement 10.2, 10.5: 範囲外の値に対するclamp動作
+        let u16_val = score_to_u16(127.996);
+        assert!(
+            u16_val >= 65534,
+            "Stone diff 127.996 should map to approximately u16 value 65535, got {}",
+            u16_val
+        );
+
+        // さらに大きい値もクランプされる
+        let u16_val_above = score_to_u16(200.0);
+        assert_eq!(
+            u16_val_above, 65535,
+            "Stone diff above 127.996 should clamp to u16 value 65535"
+        );
+    }
+
+    #[test]
+    fn test_score_to_u16_formula() {
+        // Requirement 10.2: clamp(score × 256.0 + 32768.0, 0.0, 65535.0) の式を使用
+        let test_scores = [-128.0, -64.0, -10.0, 0.0, 10.0, 64.0, 127.0];
+
+        for score in test_scores {
+            let u16_val = score_to_u16(score);
+            let raw = score * 256.0 + 32768.0;
+            let expected = raw.clamp(0.0, 65535.0) as u16;
+            assert_eq!(
+                u16_val, expected,
+                "score_to_u16({}) should return {}, got {}",
+                score, expected, u16_val
+            );
+        }
+    }
+
+    // ========== Task 9.2: スコア変換の境界値検証とSIMD最適化 Tests (TDD - RED) ==========
+
+    #[test]
+    fn test_score_conversion_boundary_values() {
+        // Requirement 10.3, 10.4, 10.5: 境界値（0、32768、65535）での変換テスト
+        let boundaries = [(0, -128.0), (32768, 0.0), (65535, 127.996_09)];
+
+        for (u16_val, expected_score) in boundaries {
+            let score = u16_to_score(u16_val);
+            assert!(
+                (score - expected_score).abs() < 0.0001,
+                "Boundary u16 {} should convert to score {}, got {}",
+                u16_val,
+                expected_score,
+                score
+            );
+        }
+    }
+
+    #[test]
+    fn test_score_conversion_round_trip() {
+        // Requirement 10.1, 10.2: 往復変換（u16→f32→u16）で元の値に戻ることを確認
+        let test_values = [0, 100, 1000, 16384, 32768, 49152, 60000, 65535];
+
+        for original in test_values {
+            let score = u16_to_score(original);
+            let back_to_u16 = score_to_u16(score);
+
+            // 浮動小数点誤差を考慮して±1の範囲を許容
+            let diff = original.abs_diff(back_to_u16);
+
+            assert!(
+                diff <= 1,
+                "Round trip conversion failed: {} -> {} -> {}, diff = {}",
+                original,
+                score,
+                back_to_u16,
+                diff
+            );
+        }
+    }
+
+    #[test]
+    fn test_score_conversion_out_of_range_clamping() {
+        // Requirement 10.2: 範囲外の値に対するclamp動作の検証
+        let out_of_range_scores = [(-500.0, 0), (-128.1, 0), (128.0, 65535), (1000.0, 65535)];
+
+        for (score, expected_u16) in out_of_range_scores {
+            let u16_val = score_to_u16(score);
+            assert_eq!(
+                u16_val, expected_u16,
+                "Out of range score {} should clamp to {}, got {}",
+                score, expected_u16, u16_val
+            );
+        }
+    }
+
+    #[test]
+    fn test_score_conversion_floating_point_precision() {
+        // Requirement 10.1, 10.2: 浮動小数点演算の精度確認
+        // 精度テスト: 0.5単位のスコアが正確に変換されるか
+        let precise_scores = [-64.5, -32.5, -0.5, 0.0, 0.5, 32.5, 64.5];
+
+        for score in precise_scores {
+            let u16_val = score_to_u16(score);
+            let back_to_score = u16_to_score(u16_val);
+
+            // 1/256.0の精度で一致すること
+            let precision = 1.0 / 256.0;
+            assert!(
+                (back_to_score - score).abs() < precision,
+                "Precision test failed for score {}: converted to u16 {} then back to {}",
+                score,
+                u16_val,
+                back_to_score
+            );
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn test_u16_to_score_simd_basic() {
+        // Requirement 10.6, 16.5: ARM NEON SIMD版実装（8個同時変換）
+        let values: [u16; 8] = [0, 10000, 20000, 32768, 40000, 50000, 60000, 65535];
+        let scores = u16_to_score_simd(&values);
+
+        // SIMD版とスカラー版が同じ結果を返すことを確認
+        for i in 0..8 {
+            let expected = u16_to_score(values[i]);
+            assert!(
+                (scores[i] - expected).abs() < 0.0001,
+                "SIMD conversion at index {} failed: expected {}, got {}",
+                i,
+                expected,
+                scores[i]
+            );
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn test_u16_to_score_simd_boundary_values() {
+        // Requirement 10.3, 10.4, 10.5: SIMD版での境界値テスト
+        let values: [u16; 8] = [0, 0, 32768, 32768, 65535, 65535, 1000, 60000];
+        let scores = u16_to_score_simd(&values);
+
+        // 境界値の検証
+        assert!(
+            (scores[0] - (-128.0)).abs() < 0.0001,
+            "SIMD: u16 0 should be -128.0"
+        );
+        assert!(
+            (scores[2] - 0.0).abs() < 0.0001,
+            "SIMD: u16 32768 should be 0.0"
+        );
+        assert!(
+            (scores[4] - 127.99609375).abs() < 0.0001,
+            "SIMD: u16 65535 should be ~127.996"
+        );
+    }
+
+    #[test]
+    fn test_task_9_requirements_summary() {
+        // Task 9.1 & 9.2の全要件を統合的に検証
+        println!("=== Task 9 Requirements Verification ===");
+
+        // Requirement 10.1: u16→f32変換式
+        let score = u16_to_score(40000);
+        let expected = (40000.0 - 32768.0) / 256.0;
+        assert!((score - expected).abs() < 0.0001);
+        println!("✓ 10.1: u16_to_score uses (value - 32768.0) / 256.0");
+
+        // Requirement 10.2: f32→u16変換式
+        let u16_val = score_to_u16(10.0);
+        let expected_u16 = ((10.0_f32 * 256.0 + 32768.0).clamp(0.0, 65535.0)) as u16;
+        assert_eq!(u16_val, expected_u16);
+        println!("✓ 10.2: score_to_u16 uses clamp(score × 256.0 + 32768.0, 0.0, 65535.0)");
+
+        // Requirement 10.3: u16値0 → 石差-128.0
+        assert_eq!(u16_to_score(0), -128.0);
+        println!("✓ 10.3: u16 value 0 maps to stone diff -128.0");
+
+        // Requirement 10.4: u16値32768 → 石差0.0
+        assert_eq!(u16_to_score(32768), 0.0);
+        println!("✓ 10.4: u16 value 32768 maps to stone diff 0.0");
+
+        // Requirement 10.5: u16値65535 → 石差+127.996
+        let max_score = u16_to_score(65535);
+        assert!((max_score - 127.996_09).abs() < 0.0001);
+        println!("✓ 10.5: u16 value 65535 maps to stone diff +127.996");
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            // Requirement 10.6, 16.5: ARM NEON SIMD版
+            let values: [u16; 8] = [0, 10000, 20000, 32768, 40000, 50000, 60000, 65535];
+            let _scores = u16_to_score_simd(&values);
+            println!("✓ 10.6, 16.5: ARM NEON SIMD version supports 8 simultaneous conversions");
+        }
+
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            println!("○ 10.6, 16.5: SIMD version (ARM64 only, skipped on this platform)");
+        }
+
+        println!("=== All Task 9 requirements verified ===");
     }
 }
