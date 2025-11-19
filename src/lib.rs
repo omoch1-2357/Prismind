@@ -3,12 +3,14 @@
 //! Phase 1: BitBoard盤面表現とパターン評価システム
 
 pub mod board;
+pub mod pattern;
 
 // Re-export commonly used types and functions
 pub use board::{
     check_game_state, final_score, legal_moves, make_move, shift, undo_move, BitBoard, Color,
     GameError, GameState, UndoInfo, DIRECTIONS,
 };
+pub use pattern::{coord_to_bit, load_patterns, Pattern, PatternError};
 
 #[cfg(test)]
 mod tests {
