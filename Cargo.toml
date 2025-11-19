@@ -40,3 +40,7 @@ harness = false
 [[bench]]
 name = "make_move_bench"
 harness = false
+
+[[bench]]
+name = "extract_patterns_bench"
+harness = false
