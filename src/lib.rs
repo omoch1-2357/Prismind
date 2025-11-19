@@ -10,7 +10,7 @@ pub use board::{
     check_game_state, final_score, legal_moves, make_move, shift, undo_move, BitBoard, Color,
     GameError, GameState, UndoInfo, DIRECTIONS,
 };
-pub use pattern::{coord_to_bit, load_patterns, Pattern, PatternError};
+pub use pattern::{coord_to_bit, extract_index, load_patterns, Pattern, PatternError};
 
 #[cfg(test)]
 mod tests {
