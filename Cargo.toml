@@ -32,3 +32,11 @@ path = "src/main.rs"
 [[bench]]
 name = "rotation_bench"
 harness = false
+
+[[bench]]
+name = "legal_moves_bench"
+harness = false
+
+[[bench]]
+name = "make_move_bench"
+harness = false

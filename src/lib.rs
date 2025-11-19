@@ -4,6 +4,11 @@
 
 pub mod board;
 
+// Re-export commonly used types and functions
+pub use board::{
+    legal_moves, make_move, shift, undo_move, BitBoard, Color, GameError, UndoInfo, DIRECTIONS,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
