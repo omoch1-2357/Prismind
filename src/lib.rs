@@ -6,7 +6,8 @@ pub mod board;
 
 // Re-export commonly used types and functions
 pub use board::{
-    legal_moves, make_move, shift, undo_move, BitBoard, Color, GameError, UndoInfo, DIRECTIONS,
+    check_game_state, final_score, legal_moves, make_move, shift, undo_move, BitBoard, Color,
+    GameError, GameState, UndoInfo, DIRECTIONS,
 };
 
 #[cfg(test)]
