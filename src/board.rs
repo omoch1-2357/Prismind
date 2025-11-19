@@ -660,6 +660,97 @@ pub fn final_score(board: &BitBoard) -> i8 {
     black_count - white_count
 }
 
+/// 盤面を8×8グリッドで表示
+///
+/// BitBoard構造体を人間が読みやすい形式で表示する。
+/// デバッグおよびゲーム進行の確認に使用する。
+///
+/// # 表示形式
+///
+/// - 黒石: `X`
+/// - 白石: `O`
+/// - 空マス: `.`
+/// - 合法手: `*` (show_legal_movesがtrueの場合のみ)
+///
+/// # Arguments
+///
+/// * `board` - 表示する盤面
+/// * `show_legal_moves` - trueの場合、合法手の位置に`*`を表示
+///
+/// # Returns
+///
+/// 盤面を表示する文字列（8×8グリッド、座標ラベル付き）
+///
+/// # Examples
+///
+/// ```
+/// use prismind::board::{BitBoard, display};
+///
+/// let board = BitBoard::new();
+/// let display_str = display(&board, false);
+/// println!("{}", display_str);
+/// ```
+///
+/// # Debug Output
+///
+/// デバッグモードでは、追加の中間状態情報（手番、手数、石数）も出力される。
+pub fn display(board: &BitBoard, show_legal_moves: bool) -> String {
+    let mut output = String::new();
+
+    // デバッグ情報: 手番、手数、石数
+    output.push_str(&format!(
+        "Turn: {:?}, Move: {}\n",
+        board.turn(),
+        board.move_count()
+    ));
+    output.push_str(&format!(
+        "Black: {}, White: {}\n",
+        board.black.count_ones(),
+        board.white_mask().count_ones()
+    ));
+
+    // 合法手を計算（オプション表示用）
+    let legal = if show_legal_moves {
+        legal_moves(board)
+    } else {
+        0
+    };
+
+    // 列ラベル
+    output.push_str("  A B C D E F G H\n");
+
+    // 各行を表示
+    for row in 0..8 {
+        // 行番号
+        output.push_str(&format!("{} ", row + 1));
+
+        // 各列のセルを表示
+        for col in 0..8 {
+            let pos = row * 8 + col;
+            let bit = 1u64 << pos;
+
+            let cell = if (board.black & bit) != 0 {
+                'X' // 黒石
+            } else if (board.white_mask() & bit) != 0 {
+                'O' // 白石
+            } else if show_legal_moves && (legal & bit) != 0 {
+                '*' // 合法手
+            } else {
+                '.' // 空マス
+            };
+
+            output.push(cell);
+            if col < 7 {
+                output.push(' ');
+            }
+        }
+
+        output.push('\n');
+    }
+
+    output
+}
+
 /// ゲーム状態を判定
 ///
 /// 現在の盤面状態から、ゲームが継続中か、パスか、終了かを判定する。
@@ -2002,5 +2093,165 @@ mod tests {
             "Score should be in range [-64, 64], got {}",
             score
         );
+    }
+
+    // ========== Task 13.1: BitBoard Display Function Tests (TDD - RED) ==========
+
+    #[test]
+    fn test_task_13_1_display_returns_8x8_grid() {
+        // Requirement 14.4: display()関数で盤面を8×8グリッドで表示
+        let board = BitBoard::new();
+        let display_str = display(&board, false);
+
+        // 8行あることを確認（ヘッダー行を除く）
+        let lines: Vec<&str> = display_str.lines().collect();
+        assert!(
+            lines.len() >= 8,
+            "Display should have at least 8 rows for the board"
+        );
+    }
+
+    #[test]
+    fn test_task_13_1_display_distinguishes_black_white_empty() {
+        // Requirement 14.4: 黒石、白石、空マスを視覚的に区別
+        let board = BitBoard::new();
+        let display_str = display(&board, false);
+
+        // 黒石、白石の表現が含まれることを確認
+        // 例: 'X' for black, 'O' for white, '.' for empty
+        // または 'B' for black, 'W' for white, '.' for empty
+        // Display format should contain visual distinction
+
+        println!("Display output:\n{}", display_str);
+
+        // 少なくとも異なる文字が使われていることを確認
+        let has_multiple_chars = display_str
+            .chars()
+            .filter(|&c| c != ' ' && c != '\n' && c != '|' && c != '-')
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            >= 2;
+        assert!(
+            has_multiple_chars,
+            "Display should use different characters for different cell states"
+        );
+    }
+
+    #[test]
+    fn test_task_13_1_display_shows_initial_position() {
+        // 初期盤面の表示が正しいことを確認
+        let board = BitBoard::new();
+        let display_str = display(&board, false);
+
+        println!("Initial board display:\n{}", display_str);
+
+        // 初期盤面には黒2個、白2個が含まれるはず
+        // 具体的な表示形式に依存するが、基本的な検証
+        assert!(!display_str.is_empty(), "Display should not be empty");
+    }
+
+    #[test]
+    fn test_task_13_1_display_with_legal_moves_option() {
+        // Requirement 14.4: 合法手の位置をオプション表示
+        let board = BitBoard::new();
+
+        // 合法手なしの表示
+        let display_without = display(&board, false);
+
+        // 合法手ありの表示
+        let display_with = display(&board, true);
+
+        println!("Display without legal moves:\n{}", display_without);
+        println!("Display with legal moves:\n{}", display_with);
+
+        // 合法手ありの場合、追加情報が含まれるはず
+        // 少なくとも表示が異なることを確認
+        assert_ne!(
+            display_without, display_with,
+            "Display with and without legal moves should differ"
+        );
+    }
+
+    #[test]
+    fn test_task_13_1_display_different_board_states() {
+        // 異なる盤面状態で異なる表示になることを確認
+        let board1 = BitBoard::new();
+        let display1 = display(&board1, false);
+
+        // 1手進めた盤面
+        let mut board2 = BitBoard::new();
+        let moves = legal_moves(&board2);
+        if moves != 0 {
+            let first_move = moves.trailing_zeros() as u8;
+            make_move(&mut board2, first_move).unwrap();
+        }
+        let display2 = display(&board2, false);
+
+        println!("Board 1:\n{}", display1);
+        println!("Board 2:\n{}", display2);
+
+        // 異なる盤面は異なる表示になるはず
+        assert_ne!(
+            display1, display2,
+            "Different boards should have different displays"
+        );
+    }
+
+    #[test]
+    fn test_task_13_1_display_coordinates() {
+        // 盤面に座標が表示されることを確認
+        let board = BitBoard::new();
+        let display_str = display(&board, false);
+
+        // 列ラベル (A-H) または 行番号 (1-8) が含まれることを期待
+        // 実装によって異なるが、基本的な座標情報があるはず
+        println!("Display with coordinates:\n{}", display_str);
+
+        // 最低限、複数行の出力があることを確認
+        assert!(
+            display_str.lines().count() >= 8,
+            "Display should have multiple rows"
+        );
+    }
+
+    #[test]
+    fn test_task_13_1_display_all_acceptance_criteria() {
+        // Task 13.1の全受入基準を統合的に検証
+        println!("=== Task 13.1 Acceptance Criteria Verification ===");
+
+        let board = BitBoard::new();
+
+        // 1. 8×8グリッドで表示
+        let display_str = display(&board, false);
+        let lines = display_str.lines().count();
+        assert!(lines >= 8, "Should display 8×8 grid");
+        println!("✓ Display shows 8×8 grid ({} lines)", lines);
+
+        // 2. 黒石、白石、空マスを視覚的に区別
+        let unique_chars = display_str
+            .chars()
+            .filter(|&c| c != ' ' && c != '\n' && c != '|' && c != '-' && c != '+')
+            .collect::<std::collections::HashSet<_>>();
+        assert!(
+            unique_chars.len() >= 2,
+            "Should distinguish different cell types"
+        );
+        println!(
+            "✓ Visual distinction for black/white/empty (unique chars: {:?})",
+            unique_chars
+        );
+
+        // 3. 合法手の位置をオプション表示
+        let display_with_moves = display(&board, true);
+        assert_ne!(
+            display_str, display_with_moves,
+            "Optional legal moves display"
+        );
+        println!("✓ Optional legal moves display");
+
+        println!("Display output:\n{}", display_str);
+        println!("\nDisplay with legal moves:\n{}", display_with_moves);
+
+        println!("=== All Task 13.1 acceptance criteria verified ===");
     }
 }

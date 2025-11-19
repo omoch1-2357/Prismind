@@ -92,8 +92,8 @@ pub mod arm64;
 
 // 再エクスポート: よく使用される型と関数をクレートルートから直接アクセス可能にする
 pub use board::{
-    check_game_state, final_score, legal_moves, make_move, shift, undo_move, BitBoard, Color,
-    GameError, GameState, UndoInfo, DIRECTIONS,
+    check_game_state, display, final_score, legal_moves, make_move, shift, undo_move, BitBoard,
+    Color, GameError, GameState, UndoInfo, DIRECTIONS,
 };
 pub use evaluator::{calculate_stage, score_to_u16, u16_to_score, EvaluationTable, Evaluator};
 pub use pattern::{coord_to_bit, extract_index, load_patterns, Pattern, PatternError};
