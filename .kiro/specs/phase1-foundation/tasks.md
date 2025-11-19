@@ -229,20 +229,21 @@ Phase 1の基礎実装を、BitBoard盤面表現からパターン評価シス�
   - プロファイリングデータ収集（perf stat、flamegraph）
   - _Requirements: 11.3, 11.5, 11.6, 15.3, 15.6, NFR-5_
 
-- [ ] 12. 統合とパブリックAPI
-- [ ] 12.1 モジュール構成とlib.rs整備
-  - board.rs、moves.rs、rotation.rs、pattern.rs、evaluator.rs、arm64.rsモジュールを作成
+- [x] 12. 統合とパブリックAPI
+- [x] 12.1 モジュール構成とlib.rs整備
+  - board.rs、pattern.rs、evaluator.rs、arm64.rsモジュールを作成
   - arm64.rsにARM64専用最適化を集約（NEON SIMD、プリフェッチ）
   - 各モジュールの公開インターフェースを定義
-  - lib.rsで全モジュールを統合
+  - lib.rsで全モジュールを統合し、よく使う型・関数を再エクスポート
   - Rustdocコメントで全公開関数の目的と使用例を記述
   - _Requirements: 13.3, NFR-3_
 
-- [ ] 12.2 パブリックAPIの統合テスト
+- [x] 12.2 パブリックAPIの統合テスト
   - BitBoard操作から評価関数までの一連のフロー検証
   - Pattern読み込みからEvaluator初期化までの統合テスト
   - 着手実行→合法手再計算→ゲーム状態判定のフロー検証
-  - エラーハンドリングパスの統合テスト
+  - エラーハンドリングパスの統合テスト（不正入力でのエラー確認）
+  - メモリ安全性検証（長時間ゲームフローでのリークチェック）
   - _Requirements: 13.5, NFR-4_
 
 - [ ] 13. デバッグ支援機能

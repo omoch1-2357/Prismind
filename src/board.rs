@@ -562,6 +562,9 @@ pub fn make_move(board: &mut BitBoard, pos: u8) -> Result<UndoInfo, GameError> {
         all_flipped |= find_flipped_in_direction(board, pos, dir);
     }
 
+    // メタデータを事前に保存
+    let old_metadata = board.white & (TURN_MASK | MOVE_COUNT_MASK);
+
     // 現在の手番に応じて石を配置・反転
     let turn = board.turn();
     if turn == Color::Black {
@@ -570,17 +573,16 @@ pub fn make_move(board: &mut BitBoard, pos: u8) -> Result<UndoInfo, GameError> {
         // 反転した石を黒に
         board.black |= all_flipped;
         // 白から除去（メタデータを保持）
-        let metadata = board.white & (TURN_MASK | MOVE_COUNT_MASK);
-        board.white = (board.white & !all_flipped) | metadata;
+        board.white = (board.white & !all_flipped & WHITE_MASK) | old_metadata;
     } else {
-        // 白石を配置（メタデータを保持）
+        // 白石を配置
         let white_stones = board.white_mask() | (1u64 << pos);
+        // 反転した石も白に
         board.white = (white_stones | all_flipped) & WHITE_MASK;
         // 黒から除去
         board.black &= !all_flipped;
-        // メタデータを再設定
-        let metadata = board.white & (TURN_MASK | MOVE_COUNT_MASK);
-        board.white |= metadata;
+        // メタデータを復元
+        board.white |= old_metadata;
     }
 
     // 手番を切り替え

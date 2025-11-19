@@ -134,6 +134,11 @@ pub fn score_to_u16(score: f32) -> u16 {
 /// この関数はARM64 (aarch64) アーキテクチャでのみ利用可能。
 /// 他のプラットフォームでは利用できない。
 ///
+/// # Note
+///
+/// この関数は[`crate::arm64::u16_to_score_simd_arm64`]へのラッパーです。
+/// ARM64専用の最適化コードは[`crate::arm64`]モジュールに集約されています。
+///
 /// # Examples
 ///
 /// ```ignore
@@ -151,33 +156,8 @@ pub fn score_to_u16(score: f32) -> u16 {
 #[cfg(target_arch = "aarch64")]
 #[inline]
 pub fn u16_to_score_simd(values: &[u16; 8]) -> [f32; 8] {
-    use std::arch::aarch64::*;
-
-    unsafe {
-        // u16の8個をロード
-        let v = vld1q_u16(values.as_ptr());
-
-        // 下位4個をu32に拡張してからf32に変換
-        let v_low_u32 = vmovl_u16(vget_low_u16(v));
-        let v_low_f32 = vcvtq_f32_u32(v_low_u32);
-
-        // 上位4個をu32に拡張してからf32に変換
-        let v_high_u32 = vmovl_u16(vget_high_u16(v));
-        let v_high_f32 = vcvtq_f32_u32(v_high_u32);
-
-        // (value - 32768.0) / 256.0 の計算
-        let offset = vdupq_n_f32(32768.0);
-        let scale = vdupq_n_f32(1.0 / 256.0);
-
-        let result_low = vmulq_f32(vsubq_f32(v_low_f32, offset), scale);
-        let result_high = vmulq_f32(vsubq_f32(v_high_f32, offset), scale);
-
-        // 結果を配列に格納
-        let mut out = [0.0f32; 8];
-        vst1q_f32(out.as_mut_ptr(), result_low);
-        vst1q_f32(out.as_mut_ptr().add(4), result_high);
-        out
-    }
+    // ARM64専用最適化モジュールに委譲
+    crate::arm64::u16_to_score_simd_arm64(values)
 }
 
 /// 評価テーブル（Structure of Arrays形式）
@@ -252,9 +232,22 @@ impl EvaluationTable {
     /// use prismind::pattern::Pattern;
     /// use prismind::evaluator::EvaluationTable;
     ///
+    /// // 14個のパターンを作成（簡略版）
     /// let patterns = vec![
     ///     Pattern::new(0, 10, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap(),
-    ///     // ... 他の13パターン
+    ///     Pattern::new(1, 10, vec![0, 8, 16, 24, 32, 40, 48, 56, 1, 9]).unwrap(),
+    ///     Pattern::new(2, 10, vec![0, 1, 8, 9, 10, 16, 17, 18, 24, 25]).unwrap(),
+    ///     Pattern::new(3, 10, vec![0, 9, 18, 27, 36, 45, 54, 63, 1, 10]).unwrap(),
+    ///     Pattern::new(4, 8, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap(),
+    ///     Pattern::new(5, 8, vec![0, 8, 16, 24, 32, 40, 48, 56]).unwrap(),
+    ///     Pattern::new(6, 8, vec![0, 9, 18, 27, 36, 45, 54, 63]).unwrap(),
+    ///     Pattern::new(7, 8, vec![7, 14, 21, 28, 35, 42, 49, 56]).unwrap(),
+    ///     Pattern::new(8, 7, vec![0, 1, 2, 3, 4, 5, 6]).unwrap(),
+    ///     Pattern::new(9, 7, vec![0, 8, 16, 24, 32, 40, 48]).unwrap(),
+    ///     Pattern::new(10, 6, vec![0, 1, 2, 3, 4, 5]).unwrap(),
+    ///     Pattern::new(11, 6, vec![0, 8, 16, 24, 32, 40]).unwrap(),
+    ///     Pattern::new(12, 5, vec![0, 1, 2, 3, 4]).unwrap(),
+    ///     Pattern::new(13, 5, vec![0, 8, 16, 24, 32]).unwrap(),
     /// ];
     /// let table = EvaluationTable::new(&patterns);
     /// ```
@@ -443,10 +436,8 @@ impl Evaluator {
 
                         unsafe {
                             let ptr = self.table.data[stage].as_ptr().add(next_offset);
-                            // ARM64 prefetch intrinsic
-                            // Note: _prefetch is not yet stable in std::arch::aarch64
-                            // Using a workaround with inline assembly or core::hint::black_box
-                            core::hint::black_box(ptr);
+                            // ARM64専用プリフェッチヒント
+                            crate::arm64::prefetch_arm64(ptr);
                         }
                     }
                 }
