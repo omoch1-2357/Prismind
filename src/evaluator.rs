@@ -5,6 +5,46 @@
 
 use crate::pattern::Pattern;
 
+/// ステージ番号を計算（手数÷2）
+///
+/// # 計算式
+///
+/// `move_count / 2`、ただし手数60の場合は29を返す
+///
+/// # 範囲
+///
+/// - 0-1手 → ステージ0
+/// - 2-3手 → ステージ1
+/// - ...
+/// - 58-59手 → ステージ29
+/// - 60手 → ステージ29（特例）
+///
+/// # Arguments
+///
+/// * `move_count` - 現在の手数（0-60）
+///
+/// # Returns
+///
+/// ステージ番号（0-29）
+///
+/// # Examples
+///
+/// ```
+/// use prismind::evaluator::calculate_stage;
+///
+/// assert_eq!(calculate_stage(0), 0);
+/// assert_eq!(calculate_stage(1), 0);
+/// assert_eq!(calculate_stage(2), 1);
+/// assert_eq!(calculate_stage(58), 29);
+/// assert_eq!(calculate_stage(60), 29);
+/// ```
+#[inline]
+pub fn calculate_stage(move_count: u8) -> usize {
+    // 手数60の場合は特別にステージ29を返す
+    // それ以外は手数÷2でステージを計算
+    std::cmp::min((move_count / 2) as usize, 29)
+}
+
 /// u16型の評価値をf32型の石差に変換
 ///
 /// # 変換式
@@ -857,6 +897,60 @@ mod tests {
             (scores[4] - 127.99609375).abs() < 0.0001,
             "SIMD: u16 65535 should be ~127.996"
         );
+    }
+
+    // ========== Task 10.1 & 10.2: ステージ管理 Tests ==========
+
+    #[test]
+    fn test_calculate_stage_basic() {
+        // Requirement 12.1: 手数を2で割った値をステージ番号として返す
+        assert_eq!(calculate_stage(0), 0);
+        assert_eq!(calculate_stage(1), 0);
+        assert_eq!(calculate_stage(2), 1);
+        assert_eq!(calculate_stage(3), 1);
+        assert_eq!(calculate_stage(4), 2);
+        assert_eq!(calculate_stage(5), 2);
+    }
+
+    #[test]
+    fn test_calculate_stage_boundary_move_60() {
+        // Requirement 12.2: 手数60の場合にステージ29を返す
+        assert_eq!(calculate_stage(60), 29);
+    }
+
+    #[test]
+    fn test_calculate_stage_range_0_to_29() {
+        // Requirement 12.3: 0-29の範囲内の整数を返すことを保証
+        for move_count in 0..=60 {
+            let stage = calculate_stage(move_count);
+            assert!(stage <= 29, "Stage should be in range 0-29");
+        }
+    }
+
+    #[test]
+    fn test_calculate_stage_boundaries() {
+        // Requirement 12.4: 境界値検証
+        assert_eq!(calculate_stage(0), 0);
+        assert_eq!(calculate_stage(1), 0);
+        assert_eq!(calculate_stage(2), 1);
+        assert_eq!(calculate_stage(3), 1);
+        assert_eq!(calculate_stage(58), 29);
+        assert_eq!(calculate_stage(59), 29);
+        assert_eq!(calculate_stage(60), 29);
+    }
+
+    #[test]
+    fn test_calculate_stage_allows_eval_table_access() {
+        // Requirement 12.5: 各ステージごとに独立した評価テーブルへのアクセスを可能にする
+        let patterns = create_test_patterns();
+        let table = EvaluationTable::new(&patterns);
+
+        // 各手数でステージを計算し、評価テーブルにアクセスできることを確認
+        for move_count in 0..=60 {
+            let stage = calculate_stage(move_count);
+            // パニックしないことを確認（範囲内アクセス）
+            let _ = table.get(0, stage, 0);
+        }
     }
 
     #[test]

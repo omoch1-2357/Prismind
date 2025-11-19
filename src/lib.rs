@@ -11,7 +11,7 @@ pub use board::{
     check_game_state, final_score, legal_moves, make_move, shift, undo_move, BitBoard, Color,
     GameError, GameState, UndoInfo, DIRECTIONS,
 };
-pub use evaluator::EvaluationTable;
+pub use evaluator::{calculate_stage, score_to_u16, u16_to_score, EvaluationTable};
 pub use pattern::{coord_to_bit, extract_index, load_patterns, Pattern, PatternError};
 
 #[cfg(test)]
