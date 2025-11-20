@@ -446,7 +446,7 @@ fn alpha_beta(
     }
     
     // 置換表に保存
-    let bound = if best_score <= alpha {
+    let bound = if best_score <= original_alpha {
         Bound::Upper
     } else if best_score >= beta {
         Bound::Lower
