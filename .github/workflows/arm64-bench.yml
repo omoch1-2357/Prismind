@@ -87,10 +87,20 @@ jobs:
             grep "Found.*outliers" "$logfile" | head -1 || echo "No outlier data"
           }
 
+          # Debug: Show log files exist
+          echo "=== Debug: Log files ==="
+          ls -la bench_*.log 2>/dev/null || echo "No benchmark log files found"
+
           # Parse results
           LEGAL_MOVES_TIME=$(extract_time bench_legal_moves.log)
           MAKE_MOVE_TIME=$(extract_time bench_make_move.log)
           ROTATE_180_TIME=$(extract_time bench_rotate_180.log)
+
+          # Debug: Show extracted values
+          echo "=== Debug: Extracted values ==="
+          echo "LEGAL_MOVES_TIME: ${LEGAL_MOVES_TIME:-N/A}"
+          echo "MAKE_MOVE_TIME: ${MAKE_MOVE_TIME:-N/A}"
+          echo "ROTATE_180_TIME: ${ROTATE_180_TIME:-N/A}"
 
           LEGAL_MOVES_OUTLIERS=$(extract_outliers bench_legal_moves.log)
           MAKE_MOVE_OUTLIERS=$(extract_outliers bench_make_move.log)
@@ -189,20 +199,31 @@ jobs:
               issue_number: context.issue.number,
             });
 
-            const botComment = comments.find(comment =>
-              comment.user.type === 'Bot' &&
+            // Find all bot comments with benchmark results
+            const botComments = comments.filter(comment =>
+              comment.user.login === 'github-actions[bot]' &&
               comment.body.includes('ARM64 Performance Benchmark Results')
             );
 
-            if (botComment) {
-              // Update existing comment
+            if (botComments.length > 0) {
+              // Update the first (oldest) comment
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                comment_id: botComment.id,
+                comment_id: botComments[0].id,
                 body: commentBody
               });
-              console.log('Updated existing benchmark comment');
+              console.log(`Updated existing benchmark comment (ID: ${botComments[0].id})`);
+
+              // Delete duplicate comments (if any)
+              for (let i = 1; i < botComments.length; i++) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComments[i].id
+                });
+                console.log(`Deleted duplicate comment (ID: ${botComments[i].id})`);
+              }
             } else {
               // Create new comment
               await github.rest.issues.createComment({
