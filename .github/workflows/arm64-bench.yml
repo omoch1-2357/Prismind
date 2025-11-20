@@ -1,0 +1,169 @@
+name: ARM64 Performance Benchmarks
+
+# Run on PRs to measure ARM64-specific optimizations
+on:
+  pull_request:
+    branches: [main, phase1-foundation]
+    paths:
+      - 'src/**'
+      - 'benches/**'
+      - 'Cargo.toml'
+      - '.github/workflows/arm64-bench.yml'
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Task 14.1: Core Operations Final Benchmark on ARM64
+  arm64-core-benchmarks:
+    name: ARM64 Core Operations Benchmark
+    # Use ARM64 runner:
+    # - macos-latest: Apple Silicon (M1/M2/M3) - Available on free GitHub
+    # - ubuntu-24.04-arm: ARM64 Linux - Requires GitHub Enterprise Cloud
+    # Using macos-latest for broader compatibility
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: arm64-bench-cache
+
+      - name: Verify ARM64 architecture
+        run: |
+          echo "Architecture: $(uname -m)"
+          echo "CPU info:"
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            sysctl -n machdep.cpu.brand_string
+            sysctl -n hw.ncpu
+          else
+            lscpu | grep -E "Architecture|CPU op-mode|Model name"
+          fi
+          rustc --version --verbose | grep host
+
+      # Task 14.1.1: legal_moves() benchmark
+      # Target: 500ns average, measure mean/stddev/p99
+      - name: Benchmark legal_moves() - 1000 iterations
+        run: |
+          echo "::group::legal_moves() Benchmark"
+          cargo bench --bench legal_moves_bench -- legal_moves_1000_iters --verbose
+          echo "::endgroup::"
+
+      # Task 14.1.2: make_move() benchmark
+      # Target: 1.5μs average, measure mean/stddev/p99
+      - name: Benchmark make_move() - 1000 iterations
+        run: |
+          echo "::group::make_move() Benchmark"
+          cargo bench --bench make_move_bench -- make_move_1000_iters --verbose
+          echo "::endgroup::"
+
+      # Task 14.1.3: rotate_180() benchmark
+      # Target: 200ns average (ARM64 REV instruction effect), measure mean/stddev/p99
+      - name: Benchmark rotate_180() - 1000 iterations
+        run: |
+          echo "::group::rotate_180() Benchmark"
+          cargo bench --bench rotation_bench -- rotate_180_1000_iters --verbose
+          echo "::endgroup::"
+
+      # Generate comprehensive benchmark report
+      - name: Generate benchmark summary
+        run: |
+          echo "## Task 14.1: Core Operations Benchmark Results (ARM64)" > benchmark_summary.md
+          echo "" >> benchmark_summary.md
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            CPU_INFO=$(sysctl -n machdep.cpu.brand_string)
+          else
+            CPU_INFO=$(lscpu | grep "Model name" | cut -d':' -f2 | xargs)
+          fi
+          echo "**Platform:** $(uname -m) - $CPU_INFO" >> benchmark_summary.md
+          echo "**Rust Version:** $(rustc --version)" >> benchmark_summary.md
+          echo "" >> benchmark_summary.md
+          echo "### Performance Targets vs Actual" >> benchmark_summary.md
+          echo "" >> benchmark_summary.md
+          echo "| Function | Target | Measured | Status |" >> benchmark_summary.md
+          echo "|----------|--------|----------|--------|" >> benchmark_summary.md
+          echo "| legal_moves() | 500ns | See Criterion output | ⏱️ |" >> benchmark_summary.md
+          echo "| make_move() | 1.5μs | See Criterion output | ⏱️ |" >> benchmark_summary.md
+          echo "| rotate_180() | 200ns | See Criterion output | ⏱️ |" >> benchmark_summary.md
+          echo "" >> benchmark_summary.md
+          echo "### Detailed Results" >> benchmark_summary.md
+          echo "" >> benchmark_summary.md
+          echo "Criterion benchmark results include:" >> benchmark_summary.md
+          echo "- Average execution time (mean)" >> benchmark_summary.md
+          echo "- Standard deviation" >> benchmark_summary.md
+          echo "- p99 percentile (99th percentile)" >> benchmark_summary.md
+          echo "- Based on 1000 iterations per benchmark" >> benchmark_summary.md
+          echo "" >> benchmark_summary.md
+          echo "See detailed Criterion HTML reports in artifacts." >> benchmark_summary.md
+          cat benchmark_summary.md
+
+      # Upload Criterion HTML reports as artifacts
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arm64-benchmark-results
+          path: |
+            target/criterion/
+            benchmark_summary.md
+          retention-days: 30
+
+      # Post benchmark summary as PR comment (optional)
+      - name: Comment benchmark results on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('benchmark_summary.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ARM64 Performance Benchmark Results\n\n${summary}\n\n**Download detailed reports:** [View Artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+            });
+
+  # Optional: Comparison with x86-64 (for reference)
+  x86-64-comparison:
+    name: x86-64 Comparison Benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: x86-64-bench-cache
+
+      - name: Verify x86-64 architecture
+        run: |
+          echo "Architecture: $(uname -m)"
+          rustc --version --verbose | grep host
+
+      - name: Run core benchmarks (x86-64)
+        run: |
+          cargo bench --bench legal_moves_bench -- legal_moves_1000_iters --verbose
+          cargo bench --bench make_move_bench -- make_move_1000_iters --verbose
+          cargo bench --bench rotation_bench -- rotate_180_1000_iters --verbose
+
+      - name: Upload x86-64 benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: x86-64-benchmark-results
+          path: target/criterion/
+          retention-days: 30

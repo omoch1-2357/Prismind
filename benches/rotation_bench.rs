@@ -33,11 +33,27 @@ fn bench_four_rotations(c: &mut Criterion) {
     });
 }
 
+/// Benchmark rotate_180() with 1000 iterations to measure statistics
+/// Target: 200ns以内 (average time, standard deviation, p99 percentile)
+fn bench_rotate_180_statistics(c: &mut Criterion) {
+    let board = BitBoard::new();
+
+    let mut group = c.benchmark_group("rotate_180_stats");
+    group.sample_size(1000); // Exactly 1000 iterations as specified
+
+    group.bench_function("rotate_180_1000_iters", |b| {
+        b.iter(|| black_box(board.rotate_180()))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_rotate_90,
     bench_rotate_180,
     bench_rotate_270,
-    bench_four_rotations
+    bench_four_rotations,
+    bench_rotate_180_statistics
 );
 criterion_main!(benches);
