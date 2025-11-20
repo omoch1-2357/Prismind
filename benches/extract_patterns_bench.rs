@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use prismind::board::BitBoard;
-use prismind::pattern::{extract_all_patterns, Pattern};
+use prismind::pattern::{Pattern, extract_all_patterns};
 
 /// ベンチマーク用のテストパターンを作成
 fn create_benchmark_patterns() -> Vec<Pattern> {

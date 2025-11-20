@@ -6,7 +6,7 @@
 //! - Requirements: 13.5, NFR-4
 
 use prismind::board::{
-    check_game_state, legal_moves, make_move, undo_move, BitBoard, Color, GameError, GameState,
+    BitBoard, Color, GameError, GameState, check_game_state, legal_moves, make_move, undo_move,
 };
 use prismind::evaluator::Evaluator;
 use prismind::pattern::load_patterns;

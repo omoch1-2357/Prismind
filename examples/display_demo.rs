@@ -2,7 +2,7 @@
 //!
 //! This example demonstrates the BitBoard display function with and without legal moves.
 
-use prismind::board::{display, legal_moves, make_move, BitBoard};
+use prismind::board::{BitBoard, display, legal_moves, make_move};
 
 fn main() {
     println!("=== BitBoard Display Function Demo ===\n");

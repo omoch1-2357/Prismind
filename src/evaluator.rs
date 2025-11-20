@@ -164,24 +164,24 @@ pub fn u16_to_score_simd(values: &[u16; 8]) -> [f32; 8] {
 ///
 /// # メモリレイアウト
 ///
-/// data[stage][flat_array]形式で保持:
+/// data\[stage\]\[flat_array\]形式で保持:
 /// - stage: 0-29（ゲームの進行度）
 /// - flat_array: 全14パターンのデータを連続配置
 ///
 /// 各ステージのflat_arrayは以下のように構成:
-/// [P01のエントリ群 | P02のエントリ群 | ... | P14のエントリ群]
+/// \[P01のエントリ群 | P02のエントリ群 | ... | P14のエントリ群\]
 ///
 /// pattern_offsetsは各パターンの開始位置を示す:
-/// - pattern_offsets[0] = 0 (P01の開始位置)
-/// - pattern_offsets[1] = 3^k[0] (P02の開始位置)
-/// - pattern_offsets[i] = sum(3^k[0..i]) (P(i+1)の開始位置)
+/// - pattern_offsets\[0\] = 0 (P01の開始位置)
+/// - pattern_offsets\[1\] = 3^k\[0\] (P02の開始位置)
+/// - pattern_offsets\[i\] = sum(3^k\[0..i\]) (P(i+1)の開始位置)
 ///
 /// # メモリ使用量
 ///
 /// 総使用量: 約70-80MB（30ステージ × 約2.3MB/ステージ）
 #[derive(Debug)]
 pub struct EvaluationTable {
-    /// [ステージ][平坦化配列]の2次元データ
+    /// \[ステージ\]\[平坦化配列\]の2次元データ
     /// 各ステージは全14パターンのエントリを連続配置
     data: Vec<Box<[u16]>>,
     /// 各パターンの開始オフセット位置
@@ -1372,6 +1372,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Performance test - run with `cargo test -- --ignored` or use benchmarks
     fn test_task_11_3_performance_hint_evaluate() {
         // Requirement 11.3: 評価関数のパフォーマンス測定（目標35μs以内）
         // 実際のベンチマークはCriterionで実施

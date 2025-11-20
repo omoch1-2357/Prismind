@@ -495,11 +495,7 @@ fn find_flipped_in_direction(board: &BitBoard, pos: u8, dir: i32) -> u64 {
     }
 
     // 最後に自分の石に到達した場合のみ反転が有効
-    if (current & player) != 0 {
-        flipped
-    } else {
-        0
-    }
+    if (current & player) != 0 { flipped } else { 0 }
 }
 
 /// 着手を実行し、石を反転する
@@ -1457,6 +1453,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Performance test - run with `cargo test -- --ignored` or use benchmarks
     fn test_legal_moves_performance_hint() {
         // パフォーマンステスト用のヒント
         // 実際のベンチマークはCriterionで実施
@@ -1824,6 +1821,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Performance test - run with `cargo test -- --ignored` or use benchmarks
     fn test_task_3_5_performance_hint() {
         // Acceptance Criterion: パフォーマンス要件（1.5μs以内）
         // 実際のベンチマークはCriterionで実施

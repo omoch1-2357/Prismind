@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use prismind::evaluator::{score_to_u16, u16_to_score};
 
 #[cfg(target_arch = "aarch64")]

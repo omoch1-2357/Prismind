@@ -6,7 +6,7 @@
 //! - evaluate(): 35μs以内（ARM64実測値ベース、プリフェッチとSoA最適化）
 //! - キャッシュミス率: 30-40%以下
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use prismind::board::BitBoard;
 use prismind::evaluator::Evaluator;
 

@@ -7,7 +7,7 @@
 //! - [`board`] - BitBoard表現による盤面管理と着手生成
 //! - [`pattern`] - パターン定義の読み込みと管理
 //! - [`evaluator`] - 評価関数とスコア変換
-//! - [`arm64`] - ARM64専用SIMD最適化（条件付きコンパイル）
+//! - `arm64` - ARM64専用SIMD最適化（条件付きコンパイル）
 //!
 //! # 使用例
 //!
@@ -92,11 +92,11 @@ pub mod arm64;
 
 // 再エクスポート: よく使用される型と関数をクレートルートから直接アクセス可能にする
 pub use board::{
-    check_game_state, display, final_score, legal_moves, make_move, shift, undo_move, BitBoard,
-    Color, GameError, GameState, UndoInfo, DIRECTIONS,
+    BitBoard, Color, DIRECTIONS, GameError, GameState, UndoInfo, check_game_state, display,
+    final_score, legal_moves, make_move, shift, undo_move,
 };
-pub use evaluator::{calculate_stage, score_to_u16, u16_to_score, EvaluationTable, Evaluator};
-pub use pattern::{coord_to_bit, extract_index, load_patterns, Pattern, PatternError};
+pub use evaluator::{EvaluationTable, Evaluator, calculate_stage, score_to_u16, u16_to_score};
+pub use pattern::{Pattern, PatternError, coord_to_bit, extract_index, load_patterns};
 
 // ARM64最適化のre-export（条件付き）
 #[cfg(target_arch = "aarch64")]

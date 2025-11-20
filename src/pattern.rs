@@ -153,7 +153,7 @@ pub fn coord_to_bit(coord: &str) -> Result<u8, PatternError> {
             return Err(PatternError::LoadError(format!(
                 "Invalid column: {}",
                 col as char
-            )))
+            )));
         }
     };
 
@@ -164,7 +164,7 @@ pub fn coord_to_bit(coord: &str) -> Result<u8, PatternError> {
             return Err(PatternError::LoadError(format!(
                 "Invalid row: {}",
                 row as char
-            )))
+            )));
         }
     };
 
@@ -280,11 +280,11 @@ pub fn extract_index(black: u64, white: u64, pattern: &Pattern, swap_colors: boo
 ///
 /// # Returns
 ///
-/// 56個のインデックスを含むVec<usize>
-/// - indices[0..13]: 0°回転, patterns 0-13
-/// - indices[14..27]: 90°回転, patterns 0-13
-/// - indices[28..41]: 180°回転, patterns 0-13
-/// - indices[42..55]: 270°回転, patterns 0-13
+/// 56個のインデックスを含む`Vec<usize>`
+/// - indices\[0..13\]: 0°回転, patterns 0-13
+/// - indices\[14..27\]: 90°回転, patterns 0-13
+/// - indices\[28..41\]: 180°回転, patterns 0-13
+/// - indices\[42..55\]: 270°回転, patterns 0-13
 ///
 /// # Examples
 ///
@@ -1954,6 +1954,7 @@ X01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
     }
 
     #[test]
+    #[ignore] // Performance test - run with `cargo test -- --ignored` or use benchmarks
     fn test_task_7_2_performance_baseline() {
         // Task 7.2 要件: パフォーマンスベースライン測定（実際のベンチマークはCriterionで）
         use crate::board::BitBoard;
