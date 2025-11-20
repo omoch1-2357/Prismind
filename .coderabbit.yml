@@ -1,0 +1,11 @@
+language: ja
+tone_instructions: "Always write complete code without omissions."
+reviews:
+  path_filters:
+    - "!.kiro/**"
+    - "!CLAUDE.md"
+  tools:
+    eslint:
+      enabled: true
+    clippy:
+      enabled: true
