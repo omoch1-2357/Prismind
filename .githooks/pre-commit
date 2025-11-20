@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+cd "$(git rev-parse --show-toplevel)"
+
+EXIT_CODE=0
+
+# ====================
+# Rust formatting check
+# ====================
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "warning: cargo not found in PATH; skipping cargo fmt."
+else
+  # If rustup available, prefer checking rustfmt; otherwise allow cargo fmt presence
+  if command -v rustup >/dev/null 2>&1; then
+    if ! rustup component list --installed 2>/dev/null | grep -q '^rustfmt'; then
+      if ! command -v rustfmt >/dev/null 2>&1; then
+        echo "warning: rustfmt not installed. Run: rustup component add rustfmt"
+      fi
+    fi
+  fi
+
+  if cargo fmt --all -- --check; then
+    echo "✓ Rust code formatting OK"
+  else
+    echo
+    echo "Running cargo fmt --all..."
+    cargo fmt --all
+    echo "✗ Rust code formatted. Review and restage the affected files."
+    EXIT_CODE=1
+  fi
+  
+  # ====================
+  # Rust clippy check
+  # ====================
+  # Run clippy for the workspace (all targets & features). Treat any warnings as errors.
+  # If rustup is available, prompt user to install the clippy component if missing.
+  if command -v rustup >/dev/null 2>&1; then
+    if ! rustup component list --installed 2>/dev/null | grep -q '^clippy'; then
+      if ! command -v cargo-clippy >/dev/null 2>&1 && ! command -v clippy-driver >/dev/null 2>&1; then
+        echo "warning: clippy not installed. Run: rustup component add clippy"
+      fi
+    fi
+  fi
+
+  echo "Checking Rust lints with cargo clippy..."
+  # Use -D warnings to ensure warnings become errors in CI/pre-commit.
+  if cargo clippy --workspace --all-targets --all-features -- -D warnings; then
+    echo "✓ Clippy passed"
+  else
+    echo
+    echo "✗ Clippy failed. Run: cargo clippy --workspace --all-targets --all-features -- -D warnings"
+    EXIT_CODE=1
+  fi
+fi
+
+# ====================
+# JavaScript checks (if Node.js available and package.json exists)
+# ====================
+if [ -f "package.json" ]; then
+  if command -v node >/dev/null 2>&1; then
+    echo "Checking JavaScript files..."
+
+    # Check for syntax errors
+    JS_FILES=$(find rust/web/static -name "*.js" -type f 2>/dev/null || true)
+    if [ -n "$JS_FILES" ]; then
+      SYNTAX_ERROR=0
+      while IFS= read -r file; do
+        if ! node --check "$file"; then
+          echo "✗ Syntax error in: $file"
+          SYNTAX_ERROR=1
+          EXIT_CODE=1
+        fi
+      done <<< "$JS_FILES"
+
+      if [ $SYNTAX_ERROR -eq 0 ]; then
+        echo "✓ JavaScript syntax OK"
+      fi
+    fi
+
+    # Run ESLint if available
+    if command -v npm >/dev/null 2>&1 && [ -f "node_modules/.bin/eslint" ]; then
+      if npm run lint --silent; then
+        echo "✓ ESLint passed"
+      else
+        echo "✗ ESLint failed. Run: npm run lint"
+        EXIT_CODE=1
+      fi
+    else
+      echo "ℹ ESLint not installed. Run: npm install"
+    fi
+  else
+    echo "warning: Node.js not found; skipping JavaScript checks"
+  fi
+fi
+
+if [ $EXIT_CODE -ne 0 ]; then
+  echo
+  echo "Pre-commit checks failed. Fix issues and try again."
+  exit 1
+fi
+
+exit 0
