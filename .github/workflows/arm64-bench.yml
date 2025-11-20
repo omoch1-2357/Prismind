@@ -54,7 +54,7 @@ jobs:
       - name: Benchmark legal_moves() - 1000 iterations
         run: |
           echo "::group::legal_moves() Benchmark"
-          cargo bench --bench legal_moves_bench -- legal_moves_1000_iters --verbose
+          cargo bench --bench legal_moves_bench -- legal_moves_1000_iters --verbose 2>&1 | tee bench_legal_moves.log
           echo "::endgroup::"
 
       # Task 14.1.2: make_move() benchmark
@@ -62,7 +62,7 @@ jobs:
       - name: Benchmark make_move() - 1000 iterations
         run: |
           echo "::group::make_move() Benchmark"
-          cargo bench --bench make_move_bench -- make_move_1000_iters --verbose
+          cargo bench --bench make_move_bench -- make_move_1000_iters --verbose 2>&1 | tee bench_make_move.log
           echo "::endgroup::"
 
       # Task 14.1.3: rotate_180() benchmark
@@ -70,12 +70,59 @@ jobs:
       - name: Benchmark rotate_180() - 1000 iterations
         run: |
           echo "::group::rotate_180() Benchmark"
-          cargo bench --bench rotation_bench -- rotate_180_1000_iters --verbose
+          cargo bench --bench rotation_bench -- rotate_180_1000_iters --verbose 2>&1 | tee bench_rotate_180.log
           echo "::endgroup::"
 
       # Generate comprehensive benchmark report
       - name: Generate benchmark summary
         run: |
+          # Extract benchmark results from logs
+          extract_time() {
+            local logfile=$1
+            grep "time:" "$logfile" | sed -n 's/.*time:.*\[\([^]]*\)\].*/\1/p' | head -1
+          }
+
+          extract_outliers() {
+            local logfile=$1
+            grep "Found.*outliers" "$logfile" | head -1 || echo "No outlier data"
+          }
+
+          # Parse results
+          LEGAL_MOVES_TIME=$(extract_time bench_legal_moves.log)
+          MAKE_MOVE_TIME=$(extract_time bench_make_move.log)
+          ROTATE_180_TIME=$(extract_time bench_rotate_180.log)
+
+          LEGAL_MOVES_OUTLIERS=$(extract_outliers bench_legal_moves.log)
+          MAKE_MOVE_OUTLIERS=$(extract_outliers bench_make_move.log)
+          ROTATE_180_OUTLIERS=$(extract_outliers bench_rotate_180.log)
+
+          # Determine status based on targets
+          check_status() {
+            local time_str=$1
+            local target_ns=$2
+
+            # Extract first number (lower bound) and convert to ns
+            local value=$(echo "$time_str" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+            local unit=$(echo "$time_str" | grep -oE '(ps|ns|us|µs|ms)' | head -1)
+
+            case "$unit" in
+              ps) value=$(echo "scale=3; $value / 1000" | bc) ;;
+              us|µs) value=$(echo "scale=3; $value * 1000" | bc) ;;
+              ms) value=$(echo "scale=3; $value * 1000000" | bc) ;;
+            esac
+
+            if (( $(echo "$value < $target_ns" | bc -l) )); then
+              echo "✅ PASS"
+            else
+              echo "⚠️ Above target"
+            fi
+          }
+
+          LEGAL_MOVES_STATUS=$(check_status "$LEGAL_MOVES_TIME" 500)
+          MAKE_MOVE_STATUS=$(check_status "$MAKE_MOVE_TIME" 1500)
+          ROTATE_180_STATUS=$(check_status "$ROTATE_180_TIME" 200)
+
+          # Generate summary
           echo "## Task 14.1: Core Operations Benchmark Results (ARM64)" > benchmark_summary.md
           echo "" >> benchmark_summary.md
           if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -88,21 +135,30 @@ jobs:
           echo "" >> benchmark_summary.md
           echo "### Performance Targets vs Actual" >> benchmark_summary.md
           echo "" >> benchmark_summary.md
-          echo "| Function | Target | Measured | Status |" >> benchmark_summary.md
-          echo "|----------|--------|----------|--------|" >> benchmark_summary.md
-          echo "| legal_moves() | 500ns | See Criterion output | ⏱️ |" >> benchmark_summary.md
-          echo "| make_move() | 1.5μs | See Criterion output | ⏱️ |" >> benchmark_summary.md
-          echo "| rotate_180() | 200ns | See Criterion output | ⏱️ |" >> benchmark_summary.md
+          echo "| Function | Target | Measured (mean) | Status |" >> benchmark_summary.md
+          echo "|----------|--------|-----------------|--------|" >> benchmark_summary.md
+          echo "| \`legal_moves()\` | 500 ns | ${LEGAL_MOVES_TIME:-N/A} | ${LEGAL_MOVES_STATUS} |" >> benchmark_summary.md
+          echo "| \`make_move()\` | 1.5 μs | ${MAKE_MOVE_TIME:-N/A} | ${MAKE_MOVE_STATUS} |" >> benchmark_summary.md
+          echo "| \`rotate_180()\` | 200 ns | ${ROTATE_180_TIME:-N/A} | ${ROTATE_180_STATUS} |" >> benchmark_summary.md
           echo "" >> benchmark_summary.md
-          echo "### Detailed Results" >> benchmark_summary.md
+          echo "### Detailed Statistics" >> benchmark_summary.md
           echo "" >> benchmark_summary.md
-          echo "Criterion benchmark results include:" >> benchmark_summary.md
-          echo "- Average execution time (mean)" >> benchmark_summary.md
-          echo "- Standard deviation" >> benchmark_summary.md
-          echo "- p99 percentile (99th percentile)" >> benchmark_summary.md
-          echo "- Based on 1000 iterations per benchmark" >> benchmark_summary.md
+          echo "**legal_moves():**" >> benchmark_summary.md
+          echo "- Time: ${LEGAL_MOVES_TIME:-N/A}" >> benchmark_summary.md
+          echo "- ${LEGAL_MOVES_OUTLIERS}" >> benchmark_summary.md
           echo "" >> benchmark_summary.md
-          echo "See detailed Criterion HTML reports in artifacts." >> benchmark_summary.md
+          echo "**make_move():**" >> benchmark_summary.md
+          echo "- Time: ${MAKE_MOVE_TIME:-N/A}" >> benchmark_summary.md
+          echo "- ${MAKE_MOVE_OUTLIERS}" >> benchmark_summary.md
+          echo "" >> benchmark_summary.md
+          echo "**rotate_180():**" >> benchmark_summary.md
+          echo "- Time: ${ROTATE_180_TIME:-N/A}" >> benchmark_summary.md
+          echo "- ${ROTATE_180_OUTLIERS}" >> benchmark_summary.md
+          echo "" >> benchmark_summary.md
+          echo "### Notes" >> benchmark_summary.md
+          echo "- All benchmarks ran with 1000 samples" >> benchmark_summary.md
+          echo "- Times shown: [lower bound, estimate, upper bound]" >> benchmark_summary.md
+          echo "- See detailed Criterion HTML reports in artifacts for complete analysis" >> benchmark_summary.md
           cat benchmark_summary.md
 
       # Upload Criterion HTML reports as artifacts
@@ -116,7 +172,7 @@ jobs:
             benchmark_summary.md
           retention-days: 30
 
-      # Post benchmark summary as PR comment (optional)
+      # Post benchmark summary as PR comment (update if exists, create if not)
       - name: Comment benchmark results on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -124,13 +180,39 @@ jobs:
           script: |
             const fs = require('fs');
             const summary = fs.readFileSync('benchmark_summary.md', 'utf8');
+            const commentBody = `## ARM64 Performance Benchmark Results\n\n${summary}\n\n**Download detailed reports:** [View Artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
 
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            // Search for existing comment
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## ARM64 Performance Benchmark Results\n\n${summary}\n\n**Download detailed reports:** [View Artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+              issue_number: context.issue.number,
             });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('ARM64 Performance Benchmark Results')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody
+              });
+              console.log('Updated existing benchmark comment');
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody
+              });
+              console.log('Created new benchmark comment');
+            }
 
   # Optional: Comparison with x86-64 (for reference)
   x86-64-comparison:
