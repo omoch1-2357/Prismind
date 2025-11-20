@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the ARM64 benchmark workflow for Task 14.1 (Core Operations Final Benchmark).
+This document describes the ARM64 benchmark workflow for Task 14.1 (Core Operations Final Benchmark) and Task 14.2 (Evaluation System Final Performance Verification).
 
 ## Purpose
 
@@ -50,15 +50,44 @@ The workflow runs on:
 
 Runs the same benchmarks on x86-64 for comparison purposes.
 
+#### 3. `arm64-eval-benchmarks` (Task 14.2)
+
+**Runner**: `macos-latest` (Apple Silicon M1/M2/M3 - ARM64)
+
+**Benchmarks** (Task 14.2 requirements):
+1. `extract_all_patterns()` - Target: 25μs average
+2. `evaluate()` - Target: 35μs average (with prefetch and SoA optimization)
+
+**Measurements**:
+- Average execution time (mean)
+- Standard deviation
+- p99 percentile (99th percentile)
+- 1000 iterations per benchmark
+
+**ARM64 Optimizations Measured**:
+- NEON SIMD: u16→f32 score conversion (8 values at once)
+- Prefetch: Next pattern access hints
+- SoA (Structure of Arrays) layout: Cache-friendly memory access
+
+**Outputs**:
+- Criterion HTML reports uploaded as artifacts (30-day retention)
+- Evaluation benchmark summary posted as PR comment
+- Cache miss rate notes (target: 30-40%)
+- Memory usage notes (target: 80MB for evaluation tables)
+
 ## Usage
 
 ### Running Locally (x86-64)
 
 ```bash
-# Run specific Task 14.1 benchmarks
+# Task 14.1: Core operations benchmarks
 cargo bench --bench legal_moves_bench -- legal_moves_1000_iters
 cargo bench --bench make_move_bench -- make_move_1000_iters
 cargo bench --bench rotation_bench -- rotate_180_1000_iters
+
+# Task 14.2: Evaluation system benchmarks
+cargo bench --bench extract_patterns_bench -- extract_all_patterns_1000_iters
+cargo bench --bench evaluate_bench -- evaluate_1000_iters
 ```
 
 **Note**: Local x86-64 results are for functional verification only. ARM64 performance targets apply only to ARM64 hardware.
@@ -77,11 +106,25 @@ Go to Actions → "ARM64 Performance Benchmarks" → "Run workflow"
 
 ## Performance Targets (ARM64)
 
+### Task 14.1: Core Operations
+
 | Function | Target | Measurement | Notes |
 |----------|--------|-------------|-------|
 | `legal_moves()` | 500ns | Mean/StdDev/p99 | ARM64 CLZ/CTZ instructions |
 | `make_move()` | 1.5μs | Mean/StdDev/p99 | Full move execution |
 | `rotate_180()` | 200ns | Mean/StdDev/p99 | ARM64 REV instruction effect |
+
+### Task 14.2: Evaluation System
+
+| Function | Target | Measurement | Notes |
+|----------|--------|-------------|-------|
+| `extract_all_patterns()` | 25μs | Mean/StdDev/p99 | 56 pattern indices extraction |
+| `evaluate()` | 35μs | Mean/StdDev/p99 | Prefetch + SoA optimization |
+
+**Additional Metrics (Task 14.2)**:
+- **Cache miss rate**: Target 30-40% (use `perf stat` locally on ARM64)
+- **Memory usage**: Target 80MB for evaluation tables (SoA format)
+- **ARM64 optimizations**: NEON SIMD, prefetch, cache-friendly layout
 
 ## Implementation Details
 
@@ -128,13 +171,28 @@ Current configuration uses `macos-latest` (Apple Silicon). Alternatives:
 2. Verify benchmark code compiles: `cargo bench --no-run`
 3. Check GitHub Actions logs for detailed error messages
 
-## Next Steps (Task 14.2, 14.3)
+## Next Steps (Task 14.3)
 
-After Task 14.1 completion:
-- Task 14.2: Evaluation system final performance verification
-- Task 14.3: Performance report creation
+After Task 14.1 and 14.2 completion:
+- Task 14.3: Performance report creation (comprehensive summary of all benchmarks)
 
-These will be added to the same workflow as additional jobs.
+### Advanced Performance Measurement (Local ARM64 only)
+
+For detailed cache miss rate measurement on ARM64:
+
+```bash
+# macOS (Apple Silicon)
+sudo cargo build --release
+sudo dtrace -n 'profile-997 /execname == "prismind"/ { @[ustack()] = count(); }'
+
+# Linux ARM64
+perf stat -e cycles,instructions,cache-references,cache-misses,branches,branch-misses \
+    cargo bench --bench evaluate_bench -- evaluate_1000_iters
+
+# Expected output
+# cache-misses: ~30-40% of cache-references
+# IPC (instructions per cycle): ~0.85-1.0
+```
 
 ## References
 

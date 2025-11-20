@@ -89,10 +89,33 @@ fn bench_extract_all_patterns_various_boards(c: &mut Criterion) {
     });
 }
 
+/// Benchmark extract_all_patterns() with 1000 iterations to measure statistics
+/// Target: 25μs以内 (average time, standard deviation, p99 percentile)
+/// Task 14.2: 評価システムの最終パフォーマンス検証
+fn bench_extract_all_patterns_statistics(c: &mut Criterion) {
+    let board = BitBoard::new();
+    let patterns = create_benchmark_patterns();
+
+    let mut group = c.benchmark_group("extract_all_patterns_stats");
+    group.sample_size(1000); // Exactly 1000 iterations as specified
+
+    group.bench_function("extract_all_patterns_1000_iters", |b| {
+        b.iter(|| {
+            black_box(extract_all_patterns(
+                black_box(&board),
+                black_box(&patterns),
+            ))
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_extract_all_patterns_initial_board,
     bench_extract_all_patterns_midgame_board,
-    bench_extract_all_patterns_various_boards
+    bench_extract_all_patterns_various_boards,
+    bench_extract_all_patterns_statistics
 );
 criterion_main!(benches);

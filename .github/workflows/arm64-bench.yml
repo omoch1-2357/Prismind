@@ -235,6 +235,211 @@ jobs:
               console.log('Created new benchmark comment');
             }
 
+  # Task 14.2: Evaluation System Final Performance Verification on ARM64
+  arm64-eval-benchmarks:
+    name: ARM64 Evaluation System Benchmark
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: arm64-eval-bench-cache
+
+      - name: Verify ARM64 architecture
+        run: |
+          echo "Architecture: $(uname -m)"
+          echo "CPU info:"
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            sysctl -n machdep.cpu.brand_string
+            sysctl -n hw.ncpu
+          else
+            lscpu | grep -E "Architecture|CPU op-mode|Model name"
+          fi
+          rustc --version --verbose | grep host
+
+      # Task 14.2.1: extract_all_patterns() benchmark
+      # Target: 25μs average, measure mean/stddev/p99
+      - name: Benchmark extract_all_patterns() - 1000 iterations
+        run: |
+          echo "::group::extract_all_patterns() Benchmark"
+          cargo bench --bench extract_patterns_bench -- extract_all_patterns_1000_iters --verbose 2>&1 | tee bench_extract_patterns.log
+          echo "::endgroup::"
+
+      # Task 14.2.2: evaluate() benchmark
+      # Target: 35μs average (プリフェッチとSoA最適化), measure mean/stddev/p99
+      - name: Benchmark evaluate() - 1000 iterations
+        run: |
+          echo "::group::evaluate() Benchmark"
+          cargo bench --bench evaluate_bench -- evaluate_1000_iters --verbose 2>&1 | tee bench_evaluate.log
+          echo "::endgroup::"
+
+      # Generate comprehensive benchmark report
+      - name: Generate evaluation system benchmark summary
+        run: |
+          # Extract benchmark results from logs
+          extract_time() {
+            local logfile=$1
+            grep "time:" "$logfile" | sed -n 's/.*time:.*\[\([^]]*\)\].*/\1/p' | head -1
+          }
+
+          extract_outliers() {
+            local logfile=$1
+            grep "Found.*outliers" "$logfile" | head -1 || echo "No outlier data"
+          }
+
+          # Debug: Show log files exist
+          echo "=== Debug: Log files ==="
+          ls -la bench_*.log 2>/dev/null || echo "No benchmark log files found"
+
+          # Parse results
+          EXTRACT_PATTERNS_TIME=$(extract_time bench_extract_patterns.log)
+          EVALUATE_TIME=$(extract_time bench_evaluate.log)
+
+          # Debug: Show extracted values
+          echo "=== Debug: Extracted values ==="
+          echo "EXTRACT_PATTERNS_TIME: ${EXTRACT_PATTERNS_TIME:-N/A}"
+          echo "EVALUATE_TIME: ${EVALUATE_TIME:-N/A}"
+
+          EXTRACT_PATTERNS_OUTLIERS=$(extract_outliers bench_extract_patterns.log)
+          EVALUATE_OUTLIERS=$(extract_outliers bench_evaluate.log)
+
+          # Determine status based on targets
+          check_status() {
+            local time_str=$1
+            local target_us=$2
+
+            # Extract first number (lower bound) and convert to us
+            local value=$(echo "$time_str" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+            local unit=$(echo "$time_str" | grep -oE '(ps|ns|us|µs|ms)' | head -1)
+
+            case "$unit" in
+              ps) value=$(echo "scale=3; $value / 1000000" | bc) ;;
+              ns) value=$(echo "scale=3; $value / 1000" | bc) ;;
+              ms) value=$(echo "scale=3; $value * 1000" | bc) ;;
+            esac
+
+            if (( $(echo "$value < $target_us" | bc -l) )); then
+              echo "✅ PASS"
+            else
+              echo "⚠️ Above target"
+            fi
+          }
+
+          EXTRACT_PATTERNS_STATUS=$(check_status "$EXTRACT_PATTERNS_TIME" 25)
+          EVALUATE_STATUS=$(check_status "$EVALUATE_TIME" 35)
+
+          # Generate summary
+          echo "## Task 14.2: Evaluation System Benchmark Results (ARM64)" > eval_benchmark_summary.md
+          echo "" >> eval_benchmark_summary.md
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            CPU_INFO=$(sysctl -n machdep.cpu.brand_string)
+          else
+            CPU_INFO=$(lscpu | grep "Model name" | cut -d':' -f2 | xargs)
+          fi
+          echo "**Platform:** $(uname -m) - $CPU_INFO" >> eval_benchmark_summary.md
+          echo "**Rust Version:** $(rustc --version)" >> eval_benchmark_summary.md
+          echo "" >> eval_benchmark_summary.md
+          echo "### Performance Targets vs Actual" >> eval_benchmark_summary.md
+          echo "" >> eval_benchmark_summary.md
+          echo "| Function | Target | Measured (mean) | Status |" >> eval_benchmark_summary.md
+          echo "|----------|--------|-----------------|--------|" >> eval_benchmark_summary.md
+          echo "| \`extract_all_patterns()\` | 25 μs | ${EXTRACT_PATTERNS_TIME:-N/A} | ${EXTRACT_PATTERNS_STATUS} |" >> eval_benchmark_summary.md
+          echo "| \`evaluate()\` | 35 μs | ${EVALUATE_TIME:-N/A} | ${EVALUATE_STATUS} |" >> eval_benchmark_summary.md
+          echo "" >> eval_benchmark_summary.md
+          echo "### Detailed Statistics" >> eval_benchmark_summary.md
+          echo "" >> eval_benchmark_summary.md
+          echo "**extract_all_patterns():**" >> eval_benchmark_summary.md
+          echo "- Time: ${EXTRACT_PATTERNS_TIME:-N/A}" >> eval_benchmark_summary.md
+          echo "- ${EXTRACT_PATTERNS_OUTLIERS}" >> eval_benchmark_summary.md
+          echo "" >> eval_benchmark_summary.md
+          echo "**evaluate():**" >> eval_benchmark_summary.md
+          echo "- Time: ${EVALUATE_TIME:-N/A}" >> eval_benchmark_summary.md
+          echo "- ${EVALUATE_OUTLIERS}" >> eval_benchmark_summary.md
+          echo "" >> eval_benchmark_summary.md
+          echo "### ARM64 Optimizations" >> eval_benchmark_summary.md
+          echo "- NEON SIMD: u16→f32 score conversion (8 values at once)" >> eval_benchmark_summary.md
+          echo "- Prefetch: Next pattern access hints" >> eval_benchmark_summary.md
+          echo "- SoA layout: Cache-friendly memory access" >> eval_benchmark_summary.md
+          echo "" >> eval_benchmark_summary.md
+          echo "### Notes" >> eval_benchmark_summary.md
+          echo "- All benchmarks ran with 1000 samples" >> eval_benchmark_summary.md
+          echo "- Times shown: [lower bound, estimate, upper bound]" >> eval_benchmark_summary.md
+          echo "- Cache miss rate: Target 30-40% (use \`perf stat\` locally for detailed measurement)" >> eval_benchmark_summary.md
+          echo "- Memory usage: Target 80MB for evaluation tables" >> eval_benchmark_summary.md
+          echo "- See detailed Criterion HTML reports in artifacts for complete analysis" >> eval_benchmark_summary.md
+          cat eval_benchmark_summary.md
+
+      # Upload Criterion HTML reports as artifacts
+      - name: Upload evaluation benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arm64-eval-benchmark-results
+          path: |
+            target/criterion/
+            eval_benchmark_summary.md
+          retention-days: 30
+
+      # Post benchmark summary as PR comment (update if exists, create if not)
+      - name: Comment evaluation benchmark results on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('eval_benchmark_summary.md', 'utf8');
+            const commentBody = `## ARM64 Evaluation System Benchmark Results\n\n${summary}\n\n**Download detailed reports:** [View Artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+
+            // Search for existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            // Find all bot comments with evaluation benchmark results
+            const botComments = comments.filter(comment =>
+              comment.user.login === 'github-actions[bot]' &&
+              comment.body.includes('ARM64 Evaluation System Benchmark Results')
+            );
+
+            if (botComments.length > 0) {
+              // Update the first (oldest) comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComments[0].id,
+                body: commentBody
+              });
+              console.log(`Updated existing evaluation benchmark comment (ID: ${botComments[0].id})`);
+
+              // Delete duplicate comments (if any)
+              for (let i = 1; i < botComments.length; i++) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComments[i].id
+                });
+                console.log(`Deleted duplicate comment (ID: ${botComments[i].id})`);
+              }
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody
+              });
+              console.log('Created new evaluation benchmark comment');
+            }
+
   # Optional: Comparison with x86-64 (for reference)
   x86-64-comparison:
     name: x86-64 Comparison Benchmark

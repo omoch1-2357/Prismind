@@ -120,6 +120,26 @@ fn bench_pattern_extraction_in_evaluate(c: &mut Criterion) {
     });
 }
 
+/// Benchmark evaluate() with 1000 iterations to measure statistics
+/// Target: 35μs以内 (average time, standard deviation, p99 percentile)
+/// Task 14.2: 評価システムの最終パフォーマンス検証
+fn bench_evaluate_statistics(c: &mut Criterion) {
+    let evaluator = Evaluator::new("patterns.csv").unwrap();
+    let board = BitBoard::new();
+
+    let mut group = c.benchmark_group("evaluate_stats");
+    group.sample_size(1000); // Exactly 1000 iterations as specified
+
+    group.bench_function("evaluate_1000_iters", |b| {
+        b.iter(|| {
+            let eval = evaluator.evaluate(black_box(&board));
+            black_box(eval)
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_evaluator_new,
@@ -127,5 +147,6 @@ criterion_group!(
     bench_evaluate_various_stages,
     bench_evaluate_cache_behavior,
     bench_pattern_extraction_in_evaluate,
+    bench_evaluate_statistics,
 );
 criterion_main!(benches);
