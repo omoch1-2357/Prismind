@@ -280,7 +280,7 @@ pub fn extract_index(black: u64, white: u64, pattern: &Pattern, swap_colors: boo
 ///
 /// # Returns
 ///
-/// 56個のインデックスを含むVec<usize>
+/// 56個のインデックスを含む`Vec<usize>`
 /// - indices[0..13]: 0°回転, patterns 0-13
 /// - indices[14..27]: 90°回転, patterns 0-13
 /// - indices[28..41]: 180°回転, patterns 0-13
