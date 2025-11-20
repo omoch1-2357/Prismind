@@ -189,7 +189,7 @@ jobs:
       # Post benchmark summary as PR comment (update if exists, create if not)
       - name: Comment benchmark results on PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
@@ -394,7 +394,7 @@ jobs:
       # Post benchmark summary as PR comment (update if exists, create if not)
       - name: Comment evaluation benchmark results on PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
