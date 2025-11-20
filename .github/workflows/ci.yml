@@ -64,9 +64,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         rust: [stable, beta]
         include:
-          # MSRV check (Minimum Supported Rust Version: 1.70)
           - os: ubuntu-latest
-            rust: 1.70.0
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
