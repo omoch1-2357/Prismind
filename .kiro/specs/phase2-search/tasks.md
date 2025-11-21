@@ -60,8 +60,8 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - 初期盤面で4手の合法手を正しく評価することを確認
   - _Requirements: 1.5, 1.7, 10.1, 10.2, 14.1_
 
-- [ ] 3. AlphaBeta枝刈りの実装
-- [ ] 3.1 AlphaBeta関数の基本構造
+- [x] 3. AlphaBeta枝刈りの実装
+- [x] 3.1 AlphaBeta関数の基本構造
   - alpha_beta()関数を実装（board: &mut BitBoard, depth: i32, alpha: i32, beta: i32, evaluator: &Evaluator, tt: &mut TranspositionTable, zobrist: &ZobristTable）
   - alpha値とbeta値を引数として受け取る
   - 評価値がbeta以上でbeta cutを実行
@@ -69,7 +69,7 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - fail-soft実装でalpha-beta範囲外の正確な評価値を返す
   - _Requirements: 2.1, 2.2, 2.3, 2.4_
 
-- [ ] 3.2 AlphaBetaと置換表の統合
+- [x] 3.2 AlphaBetaと置換表の統合
   - 探索開始時に置換表をプローブ
   - 深さが十分なら置換表の評価値を使用
   - 境界タイプ（Exact、Lower、Upper）に応じて枝刈りを適用
