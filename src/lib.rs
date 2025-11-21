@@ -98,7 +98,9 @@ pub use board::{
 };
 pub use evaluator::{EvaluationTable, Evaluator, calculate_stage, score_to_u16, u16_to_score};
 pub use pattern::{Pattern, PatternError, coord_to_bit, extract_index, load_patterns};
-pub use search::{Bound, SearchError, SearchResult, TTEntry, TranspositionTable, ZobristTable};
+pub use search::{
+    Bound, SearchError, SearchResult, TTEntry, TranspositionTable, ZobristTable, negamax,
+};
 
 // ARM64最適化のre-export（条件付き）
 #[cfg(target_arch = "aarch64")]

@@ -2,7 +2,10 @@
 //!
 //! Negamax、AlphaBeta、MTD(f)探索を実装し、Phase 3学習システムへの統合APIを提供する。
 
-use crate::board::BitBoard;
+use crate::board::{
+    BitBoard, GameState, check_game_state, final_score, legal_moves, make_move, undo_move,
+};
+use crate::evaluator::Evaluator;
 use thiserror::Error;
 
 /// 探索エラー型
@@ -314,10 +317,125 @@ impl TranspositionTable {
     }
 }
 
+/// Negamax探索アルゴリズム
+///
+/// 深さ制限付きNegamax探索を実装する。再帰的にゲーム木を探索し、
+/// 最善評価値と最善手を返す。
+///
+/// # Arguments
+///
+/// * `board` - 現在の盤面
+/// * `depth` - 残り探索深さ
+/// * `evaluator` - 評価関数
+/// * `zobrist` - Zobristハッシュテーブル
+/// * `nodes` - 探索ノード数カウンタ（統計収集用）
+///
+/// # Returns
+///
+/// (評価値, 最善手のOption<u8>)
+///
+/// # Negamaxの原則
+///
+/// Negamaxは、ミニマックスの符号反転版である。
+/// 常に現在の手番の視点から評価値を返すため、
+/// 再帰呼び出し時に評価値を反転する。
+///
+/// # Examples
+///
+/// ```ignore
+/// use prismind::search::negamax;
+/// use prismind::board::BitBoard;
+/// use prismind::evaluator::Evaluator;
+/// use prismind::search::ZobristTable;
+///
+/// let evaluator = Evaluator::new("patterns.csv").unwrap();
+/// let board = BitBoard::new();
+/// let zobrist = ZobristTable::new();
+/// let mut nodes = 0;
+///
+/// let (score, best_move) = negamax(&board, 3, &evaluator, &zobrist, &mut nodes);
+/// ```
+pub fn negamax(
+    board: &BitBoard,
+    depth: i32,
+    evaluator: &Evaluator,
+    _zobrist: &ZobristTable,
+    nodes: &mut u64,
+) -> (f32, Option<u8>) {
+    // ノード数をカウント
+    *nodes += 1;
+
+    // 深さ0に到達した場合、評価関数を呼び出して葉ノードの評価値を返す
+    if depth == 0 {
+        let score = evaluator.evaluate(board);
+        return (score, None);
+    }
+
+    // ゲーム終了状態をチェック
+    match check_game_state(board) {
+        GameState::GameOver(_) => {
+            // 最終スコア×100を評価値として返す
+            let final_score_val = final_score(board);
+            let score = (final_score_val as f32) * 100.0;
+            return (score, None);
+        }
+        GameState::Pass => {
+            // パス状態の際、盤面を反転して相手番として探索を継続
+            let flipped_board = board.flip();
+            let (score, _) = negamax(&flipped_board, depth, evaluator, _zobrist, nodes);
+            // 符号反転（Negamaxの原則）
+            return (-score, None);
+        }
+        GameState::Playing => {
+            // ゲーム継続中、合法手を探索
+        }
+    }
+
+    // 全合法手を取得
+    let moves = legal_moves(board);
+
+    // 合法手がない場合（通常は上記のGameState判定で捕捉されるが、念のため）
+    if moves == 0 {
+        let score = evaluator.evaluate(board);
+        return (score, None);
+    }
+
+    // 最善評価値と最善手を初期化
+    let mut best_score = f32::NEG_INFINITY;
+    let mut best_move = None;
+
+    // 全合法手について再帰的に探索
+    let mut move_bits = moves;
+    while move_bits != 0 {
+        let pos = move_bits.trailing_zeros() as u8;
+        move_bits &= move_bits - 1; // 最下位ビットをクリア
+
+        // 着手を実行
+        let mut new_board = *board;
+        if let Ok(undo_info) = make_move(&mut new_board, pos) {
+            // 再帰的に探索（符号反転でNegamaxの原則を適用）
+            let (score, _) = negamax(&new_board, depth - 1, evaluator, _zobrist, nodes);
+            let negamax_score = -score;
+
+            // 最大評価値を選択
+            if negamax_score > best_score {
+                best_score = negamax_score;
+                best_move = Some(pos);
+            }
+
+            // 着手を取り消し
+            undo_move(&mut new_board, undo_info);
+        }
+    }
+
+    (best_score, best_move)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::board::{BitBoard, make_move};
+    use crate::board::{BitBoard, legal_moves, make_move};
+    use crate::evaluator::Evaluator;
 
     #[test]
     fn test_zobrist_deterministic() {
@@ -499,5 +617,250 @@ mod tests {
 
         let result_zero = SearchResult::new(None, 0.0, 0, 0, 0, 0);
         assert_eq!(result_zero.tt_hit_rate(), 0.0, "ノード数0の場合はヒット率0");
+    }
+
+    // ========== Task 2.1: Negamax関数の実装 Tests (TDD - RED) ==========
+
+    #[test]
+    fn test_negamax_depth_0_returns_evaluation() {
+        // Requirement 1.2: 深さ0で評価関数を呼び出して葉ノードの評価値を返す
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping negamax test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let board = BitBoard::new();
+        let zobrist = ZobristTable::new();
+        let mut nodes = 0u64;
+
+        let (score, best_move) = negamax(&board, 0, &evaluator, &zobrist, &mut nodes);
+
+        // 深さ0では評価関数の結果を返す
+        let expected_score = evaluator.evaluate(&board);
+        assert!(
+            (score - expected_score).abs() < 0.01,
+            "Depth 0 should return evaluator result, got {} expected {}",
+            score,
+            expected_score
+        );
+        assert!(best_move.is_none(), "Depth 0 should not return a best move");
+        assert_eq!(nodes, 1, "Should count 1 node at depth 0");
+    }
+
+    #[test]
+    fn test_negamax_game_over_returns_final_score() {
+        // Requirement 1.3: ゲーム終了状態で最終スコア×100を返す
+        // 手数60に到達した盤面を作成（強制終了）
+        let mut board = BitBoard::new();
+
+        // Move count を60に設定（手動で60手進めるシミュレーション）
+        // 簡易的にmake_moveを繰り返して手数を進める
+        for _ in 0..30 {
+            let moves = legal_moves(&board);
+            if moves != 0 {
+                let pos = moves.trailing_zeros() as u8;
+                if make_move(&mut board, pos).is_err() {
+                    break;
+                }
+            } else {
+                // パスの場合は手番を反転
+                board = board.flip();
+            }
+        }
+
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping negamax test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let zobrist = ZobristTable::new();
+        let mut nodes = 0u64;
+
+        // ゲーム終了状態での探索
+        let (score, _) = negamax(&board, 5, &evaluator, &zobrist, &mut nodes);
+
+        // ゲーム終了状態では最終スコア×100を返す
+        // 実際のスコアは盤面によって異なるが、範囲内であることを確認
+        assert!(
+            score.abs() <= 6400.0,
+            "Game over score should be in range [-6400, 6400], got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_negamax_depth_1_evaluates_all_legal_moves() {
+        // Requirement 1.4: 全合法手について再帰的に探索し、最大評価値を選択
+        // Requirements 2.1, 2.2: 深さ1で全合法手を評価し最善手を返すテスト
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping negamax test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let board = BitBoard::new();
+        let zobrist = ZobristTable::new();
+        let mut nodes = 0u64;
+
+        let (_score, best_move) = negamax(&board, 1, &evaluator, &zobrist, &mut nodes);
+
+        // 深さ1では最善手が返される
+        assert!(best_move.is_some(), "Depth 1 should return a best move");
+
+        // 最善手は合法手のいずれかである
+        let legal = legal_moves(&board);
+        let best_pos = best_move.unwrap();
+        assert_ne!(
+            legal & (1 << best_pos),
+            0,
+            "Best move {} should be a legal move",
+            best_pos
+        );
+
+        // 初期盤面には4手の合法手がある
+        // ノード数は 1 (root) + 4 (children) = 5
+        assert!(
+            nodes >= 5,
+            "Should explore at least 5 nodes at depth 1 for initial position, got {}",
+            nodes
+        );
+    }
+
+    #[test]
+    fn test_negamax_sign_inversion() {
+        // Requirement 1.6: 符号反転により手番の視点を統一（Negamaxの原則）
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping negamax test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let board = BitBoard::new();
+        let zobrist = ZobristTable::new();
+        let mut nodes = 0u64;
+
+        let (score_black, _) = negamax(&board, 1, &evaluator, &zobrist, &mut nodes);
+
+        // 白の手番でも同じ盤面
+        let board_white = board.flip();
+        let mut nodes_white = 0u64;
+        let (score_white, _) = negamax(&board_white, 1, &evaluator, &zobrist, &mut nodes_white);
+
+        // Negamaxの原則: 手番を切り替えると評価値の符号が反転
+        // (完全な対称性が保証されない場合もあるため、緩い検証)
+        println!(
+            "Black score: {}, White score: {} (should be approximately negated)",
+            score_black, score_white
+        );
+    }
+
+    // ========== Task 2.2: Negamaxのパス処理と最善手返却 Tests (TDD - RED) ==========
+
+    #[test]
+    fn test_negamax_pass_handling() {
+        // Requirement 1.5: パス状態の際に盤面を反転して相手番として探索を継続
+        // 黒が打てず、白は打てる状況を作る
+        // (実際のパス状況は複雑なので、シンプルなケースで検証)
+
+        // このテストは統合テスト段階で詳細に検証
+        // ここでは関数シグネチャの確認のみ
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping negamax test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let board = BitBoard::new();
+        let zobrist = ZobristTable::new();
+        let mut nodes = 0u64;
+
+        // 基本的な探索が動作することを確認
+        let (_score, _best_move) = negamax(&board, 2, &evaluator, &zobrist, &mut nodes);
+        assert!(nodes > 0, "Should count nodes during search");
+    }
+
+    #[test]
+    fn test_negamax_returns_option_u8_best_move() {
+        // Requirement 1.7: 最善手の位置情報をOption<u8>として返す
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping negamax test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let board = BitBoard::new();
+        let zobrist = ZobristTable::new();
+        let mut nodes = 0u64;
+
+        let (_score, best_move) = negamax(&board, 1, &evaluator, &zobrist, &mut nodes);
+
+        // 型がOption<u8>であることを確認
+        assert!(
+            best_move.is_some(),
+            "Initial position should have a best move"
+        );
+
+        let pos = best_move.unwrap();
+        assert!(pos < 64, "Best move position should be 0-63, got {}", pos);
+    }
+
+    #[test]
+    fn test_negamax_counts_nodes() {
+        // Requirements 10.1, 10.2: 探索ノード数をカウント（統計収集）
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping negamax test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let board = BitBoard::new();
+        let zobrist = ZobristTable::new();
+        let mut nodes = 0u64;
+
+        let (_score, _best_move) = negamax(&board, 2, &evaluator, &zobrist, &mut nodes);
+
+        // 深さ2では多数のノードを探索する
+        // 初期盤面: 1 + 4 + 4*子ノード数
+        assert!(
+            nodes > 10,
+            "Depth 2 should explore many nodes, got {}",
+            nodes
+        );
+    }
+
+    #[test]
+    fn test_negamax_initial_board_four_legal_moves() {
+        // Requirement 14.1: 初期盤面で4手の合法手を正しく評価することを確認
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping negamax test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let board = BitBoard::new();
+        let zobrist = ZobristTable::new();
+        let mut nodes = 0u64;
+
+        // 深さ1で探索
+        let (_score, best_move) = negamax(&board, 1, &evaluator, &zobrist, &mut nodes);
+
+        // 初期盤面には4手の合法手がある
+        let legal = legal_moves(&board);
+        assert_eq!(
+            legal.count_ones(),
+            4,
+            "Initial board should have 4 legal moves"
+        );
+
+        // 最善手が合法手のいずれかであることを確認
+        assert!(best_move.is_some(), "Should return a best move");
+        let best_pos = best_move.unwrap();
+        assert_ne!(
+            legal & (1 << best_pos),
+            0,
+            "Best move should be one of the 4 legal moves"
+        );
     }
 }

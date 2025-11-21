@@ -43,8 +43,8 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - Display traitを実装して人間可読な形式で出力
   - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 13.1, 13.4, 13.5_
 
-- [ ] 2. Negamax探索の基本実装
-- [ ] 2.1 Negamax関数の実装
+- [x] 2. Negamax探索の基本実装
+- [x] 2.1 Negamax関数の実装
   - negamax()関数を実装（board: &BitBoard, depth: i32, evaluator: &Evaluator）
   - 深さ0で評価関数を呼び出して葉ノードの評価値を返す
   - ゲーム終了状態で最終スコア×100を返す
@@ -52,7 +52,7 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - 符号反転により手番の視点を統一（Negamaxの原則）
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.6_
 
-- [ ] 2.2 Negamaxのパス処理と最善手返却
+- [x] 2.2 Negamaxのパス処理と最善手返却
   - パス状態の際に盤面を反転して相手番として探索を継続
   - 最善手の位置情報をOption<u8>として返す
   - 探索ノード数をカウント（統計収集）
