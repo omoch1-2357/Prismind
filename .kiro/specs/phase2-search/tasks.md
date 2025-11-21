@@ -8,8 +8,8 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
 
 ## タスクリスト
 
-- [ ] 1. 探索システム基盤の構築
-- [ ] 1.1 (P) Zobristハッシュの実装
+- [x] 1. 探索システム基盤の構築
+- [x] 1.1 (P) Zobristハッシュの実装
   - ZobristTable構造体を定義（black: [u64; 64], white: [u64; 64], turn: u64）
   - 固定シード値で乱数を生成（再現性確保）
   - hash()メソッドでBitBoardから64ビットハッシュ値を計算
@@ -17,7 +17,7 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - 同じ盤面で常に同じハッシュ値を返すことを検証するテスト
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.6_
 
-- [ ] 1.2 (P) 置換表構造体の実装
+- [x] 1.2 (P) 置換表構造体の実装
   - TTEntry構造体を定義（hash: u64, depth: i8, bound: Bound, score: i16, best_move: u8, age: u8）
   - Bound列挙型を定義（Exact、Lower、Upper）
   - TranspositionTable構造体を定義（entries: Vec<Option<TTEntry>>, size: usize, current_age: u8）
@@ -26,7 +26,7 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - メモリ確保失敗時にSearchError::MemoryAllocationを返す
   - _Requirements: 3.1, 3.2, 13.1, 13.2_
 
-- [ ] 1.3 (P) 置換表の基本操作
+- [x] 1.3 (P) 置換表の基本操作
   - probe()メソッドでZobristハッシュから既存エントリを検索
   - hash値の完全一致を確認（衝突検出）
   - store()メソッドで新しいエントリを保存
@@ -35,7 +35,7 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - 同一局面で既存エントリを取得するテスト
   - _Requirements: 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
 
-- [ ] 1.4 (P) SearchError型とSearchResult構造体
+- [x] 1.4 (P) SearchError型とSearchResult構造体
   - SearchError列挙型を定義（MemoryAllocation、EvaluationError、TimeoutExceeded、InvalidBoardState）
   - thiserrorクレートで詳細なエラーメッセージを実装
   - SearchResult構造体を定義（best_move: Option<u8>, score: f32, depth: u8, nodes_searched: u64, tt_hits: u64, elapsed_ms: u64, pv: Option<Vec<u8>>）

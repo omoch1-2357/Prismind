@@ -85,6 +85,7 @@
 pub mod board;
 pub mod evaluator;
 pub mod pattern;
+pub mod search;
 
 // ARM64専用最適化モジュール（条件付きコンパイル）
 #[cfg(target_arch = "aarch64")]
@@ -97,6 +98,7 @@ pub use board::{
 };
 pub use evaluator::{EvaluationTable, Evaluator, calculate_stage, score_to_u16, u16_to_score};
 pub use pattern::{Pattern, PatternError, coord_to_bit, extract_index, load_patterns};
+pub use search::{Bound, SearchError, SearchResult, TTEntry, TranspositionTable, ZobristTable};
 
 // ARM64最適化のre-export（条件付き）
 #[cfg(target_arch = "aarch64")]
