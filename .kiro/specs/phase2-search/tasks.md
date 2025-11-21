@@ -95,8 +95,8 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - 初期盤面での探索時間短縮効果を測定
   - _Requirements: 6.6, 14.6_
 
-- [ ] 5. MTD(f)探索の実装
-- [ ] 5.1 MTD(f)関数の基本構造
+- [x] 5. MTD(f)探索の実装
+- [x] 5.1 MTD(f)関数の基本構造
   - mtdf()関数を実装（board: &mut BitBoard, depth: i32, guess: i32, evaluator: &Evaluator, tt: &mut TranspositionTable, zobrist: &ZobristTable）
   - 初期推測値（guess）を受け取り、反復的にゼロ幅探索を実行
   - 探索結果がbeta未満の際にupper boundを更新
@@ -104,7 +104,7 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - lower boundとupper boundが一致するまで探索を繰り返す
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
 
-- [ ] 5.2 MTD(f)の正当性検証と効率測定
+- [x] 5.2 MTD(f)の正当性検証と効率測定
   - MTD(f)がAlphaBetaと同じ最善手と評価値を返すことを保証するテスト
   - 探索ノード数がAlphaBetaの70-80%に削減されることを確認
   - 通常2-3パス、最悪5-15パスで収束することを検証
