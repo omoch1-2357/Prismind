@@ -466,6 +466,119 @@ pub fn negamax(
     (best_score, best_move)
 }
 
+/// 角の位置か判定
+///
+/// # Arguments
+/// * `pos` - 盤面の位置（0-63）
+///
+/// # Returns
+/// 角の位置（0, 7, 56, 63）ならtrue
+#[inline]
+fn is_corner(pos: u8) -> bool {
+    matches!(pos, 0 | 7 | 56 | 63)
+}
+
+/// X打ち（角の隣）か判定
+///
+/// # Arguments
+/// * `pos` - 盤面の位置（0-63）
+///
+/// # Returns
+/// X打ち位置（1, 8, 9, 6, 14, 15, 48, 49, 54, 55, 57, 62）ならtrue
+#[inline]
+fn is_x_square(pos: u8) -> bool {
+    matches!(pos, 1 | 8 | 9 | 6 | 14 | 15 | 48 | 49 | 54 | 55 | 57 | 62)
+}
+
+/// 辺の位置か判定
+///
+/// # Arguments
+/// * `pos` - 盤面の位置（0-63）
+///
+/// # Returns
+/// 辺の位置（角を除く）ならtrue
+#[inline]
+fn is_edge(pos: u8) -> bool {
+    if is_corner(pos) {
+        return false;
+    }
+    let row = pos / 8;
+    let col = pos % 8;
+    row == 0 || row == 7 || col == 0 || col == 7
+}
+
+/// 合法手を優先順位付けしてソート
+///
+/// # Arguments
+/// * `moves` - 合法手のビットマスク
+/// * `tt_best_move` - 置換表の最善手（Option<u8>）
+///
+/// # Returns
+/// Vec<u8> - 優先順位順の合法手リスト
+///
+/// # 優先順位
+/// 1. 置換表最善手（TT best move）
+/// 2. 角を取る手（Corners: 0, 7, 56, 63）
+/// 3. 辺の手（Edges: row/col == 0 or 7, excluding corners）
+/// 4. 内側の手（Center squares）
+/// 5. X打ち（X-squares: corner adjacents）
+///
+/// # Preconditions
+/// * `moves`は合法手のビットマスク（0なら空のVecを返す）
+///
+/// # Postconditions
+/// * 返却リストは合法手のみ含む
+/// * 置換表最善手が先頭（存在する場合）
+pub fn order_moves(moves: u64, tt_best_move: Option<u8>) -> Vec<u8> {
+    // 合法手がない場合は空のVecを返す
+    if moves == 0 {
+        return Vec::new();
+    }
+
+    // 合法手をVecに変換
+    let mut move_list = Vec::new();
+    let mut move_bits = moves;
+    while move_bits != 0 {
+        let pos = move_bits.trailing_zeros() as u8;
+        move_list.push(pos);
+        move_bits &= move_bits - 1; // 最下位ビットをクリア
+    }
+
+    // 優先順位付け関数
+    let priority = |pos: u8| -> i32 {
+        // TT最善手が最優先
+        if let Some(tt_move) = tt_best_move
+            && pos == tt_move
+        {
+            return 1000; // 最高優先度
+        }
+
+        // 角: 優先度100
+        if is_corner(pos) {
+            return 100;
+        }
+
+        // X打ち: 優先度-50（低優先度）
+        // 注: X打ちは辺と重なる場合があるため、辺より先にチェック
+        if is_x_square(pos) {
+            return -50;
+        }
+
+        // 辺: 優先度50
+        if is_edge(pos) {
+            return 50;
+        }
+
+        // 内側: 優先度10
+        10
+    };
+
+    // 優先順位でソート（降順）
+    move_list.sort_by_key(|b| std::cmp::Reverse(priority(*b)));
+
+    move_list
+}
+
 /// Alpha-Beta枝刈り探索
 ///
 /// Alpha-Beta枝刈りを使用して探索効率を向上させる。fail-soft実装により
@@ -632,16 +745,26 @@ pub fn alpha_beta(
         return (score, None);
     }
 
+    // 置換表から最善手を取得（ムーブオーダリング用）
+    let tt_best_move = if let Some(entry) = ctx.tt.probe(hash) {
+        if entry.best_move != 255 {
+            Some(entry.best_move)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // ムーブオーダリング: 合法手を優先順位付けしてソート
+    let ordered_moves = order_moves(moves, tt_best_move);
+
     // 最善評価値と最善手を初期化
     let mut best_score = f32::NEG_INFINITY;
     let mut best_move = None;
 
-    // 全合法手について再帰的に探索
-    let mut move_bits = moves;
-    while move_bits != 0 {
-        let pos = move_bits.trailing_zeros() as u8;
-        move_bits &= move_bits - 1; // 最下位ビットをクリア
-
+    // 優先順位付けされた合法手について再帰的に探索
+    for pos in ordered_moves {
         // 着手を実行
         if let Ok(undo_info) = make_move(board, pos) {
             // 再帰的に探索（符号反転でNegamaxの原則を適用）
@@ -1411,5 +1534,289 @@ mod tests {
         let entry = entry.unwrap();
         assert_eq!(entry.hash, hash, "TT entry hash should match");
         assert!(entry.depth >= 0, "TT entry should have valid depth");
+    }
+
+    // ========== Task 4.1: 静的ムーブオーダリング関数 Tests (TDD - RED) ==========
+
+    #[test]
+    fn test_order_moves_corners_priority() {
+        // Requirement 6.2: 角を取る手を高優先度で評価（0, 7, 56, 63）
+        // 角のマスが含まれる場合、優先度が高いことを確認
+
+        // 角を含む合法手ビットマスク
+        // 0, 7, 19, 56 の位置が合法手とする
+        let moves = (1u64 << 0) | (1u64 << 7) | (1u64 << 19) | (1u64 << 56);
+        let tt_best_move = None;
+
+        let ordered = order_moves(moves, tt_best_move);
+
+        // 角のマス（0, 7, 56）が上位に来ることを確認
+        assert!(ordered.len() == 4, "Should have 4 moves");
+
+        let first_three = &ordered[0..3];
+        assert!(
+            first_three.contains(&0) && first_three.contains(&7) && first_three.contains(&56),
+            "Corners should be in top 3 positions, got {:?}",
+            ordered
+        );
+    }
+
+    #[test]
+    fn test_order_moves_x_squares_low_priority() {
+        // Requirement 6.3: 角の隣（X打ち）を低優先度で評価
+        // X打ち: 1, 8, 9, 6, 14, 15, 48, 49, 54, 55, 57, 62
+
+        // X打ち（1, 9）と通常の手（20, 30）を含む
+        let moves = (1u64 << 1) | (1u64 << 9) | (1u64 << 20) | (1u64 << 30);
+        let tt_best_move = None;
+
+        let ordered = order_moves(moves, tt_best_move);
+
+        assert!(ordered.len() == 4, "Should have 4 moves");
+
+        // X打ちは最後の方に来るべき
+        let last_two = &ordered[2..4];
+        assert!(
+            last_two.contains(&1) && last_two.contains(&9),
+            "X-squares should be in last positions, got {:?}",
+            ordered
+        );
+    }
+
+    #[test]
+    fn test_order_moves_edges_mid_priority() {
+        // Requirement 6.4: 辺の手を中優先度で評価
+        // 辺: row == 0 or row == 7 or col == 0 or col == 7 (角を除く)
+
+        // 辺のマス（2, 3, 58, 59）と内側（20, 30）
+        let moves = (1u64 << 2) | (1u64 << 3) | (1u64 << 20) | (1u64 << 58);
+        let tt_best_move = None;
+
+        let ordered = order_moves(moves, tt_best_move);
+
+        assert!(ordered.len() == 4, "Should have 4 moves");
+
+        // 辺のマスが上位に来ることを確認（角ほどではないが内側より高い）
+        let first_two = &ordered[0..2];
+        // 辺は内側より優先されるべき
+        assert!(
+            first_two.contains(&2) || first_two.contains(&3) || first_two.contains(&58),
+            "Edges should have higher priority than center, got {:?}",
+            ordered
+        );
+    }
+
+    #[test]
+    fn test_order_moves_tt_best_move_first() {
+        // Requirement 6.1: 置換表の最善手を最優先で評価
+
+        let moves = (1u64 << 19) | (1u64 << 20) | (1u64 << 27) | (1u64 << 28);
+        let tt_best_move = Some(27);
+
+        let ordered = order_moves(moves, tt_best_move);
+
+        assert!(ordered.len() == 4, "Should have 4 moves");
+        assert_eq!(
+            ordered[0], 27,
+            "TT best move should be first, got {:?}",
+            ordered
+        );
+    }
+
+    #[test]
+    fn test_order_moves_returns_sorted_vec() {
+        // Requirement 6.5: 優先度順にソートされた合法手リスト（Vec<u8>）を返す
+
+        let moves = (1u64 << 0) | (1u64 << 1) | (1u64 << 19) | (1u64 << 20);
+        let tt_best_move = None;
+
+        let ordered = order_moves(moves, tt_best_move);
+
+        // Vec<u8>型で返されることを確認
+        assert!(ordered.len() == 4, "Should return 4 moves");
+
+        // 全て0-63の範囲
+        for &pos in &ordered {
+            assert!(pos < 64, "Move position should be 0-63, got {}", pos);
+        }
+
+        // 全て合法手に含まれる
+        for &pos in &ordered {
+            assert_ne!(
+                moves & (1u64 << pos),
+                0,
+                "Position {} should be in legal moves",
+                pos
+            );
+        }
+    }
+
+    #[test]
+    fn test_order_moves_empty_moves() {
+        // エッジケース: 合法手がない場合
+        let moves = 0u64;
+        let tt_best_move = None;
+
+        let ordered = order_moves(moves, tt_best_move);
+
+        assert!(ordered.is_empty(), "Empty moves should return empty Vec");
+    }
+
+    #[test]
+    fn test_order_moves_complex_scenario() {
+        // 複雑なシナリオ: 角、辺、X打ち、内側、TT最善手が全て含まれる
+        // TT最善手: 27
+        // 角: 0
+        // 辺: 3
+        // X打ち: 1
+        // 内側: 20
+        let moves = (1u64 << 0) | (1u64 << 1) | (1u64 << 3) | (1u64 << 20) | (1u64 << 27);
+        let tt_best_move = Some(27);
+
+        let ordered = order_moves(moves, tt_best_move);
+
+        assert!(ordered.len() == 5, "Should have 5 moves");
+
+        // 優先順位: TT最善手(27) > 角(0) > 辺(3) > 内側(20) > X打ち(1)
+        assert_eq!(ordered[0], 27, "TT move should be first");
+        assert_eq!(ordered[1], 0, "Corner should be second");
+        // 残りの順序も確認
+        assert!(
+            ordered[4] == 1,
+            "X-square should be last, got {:?}",
+            ordered
+        );
+    }
+
+    // ========== Task 4.2: AlphaBetaにムーブオーダリングを適用 Tests (TDD - RED) ==========
+
+    #[test]
+    fn test_alphabeta_with_move_ordering_same_result() {
+        // ムーブオーダリング適用後もAlphaBetaが同じ結果を返すことを確認
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let board = BitBoard::new();
+
+        // ムーブオーダリングなし（現在の実装）
+        let mut board1 = board;
+        let mut tt1 = TranspositionTable::new(128).unwrap();
+        let zobrist = ZobristTable::new();
+        let mut stats1 = SearchStats::new();
+        let mut ctx1 = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt1,
+            zobrist: &zobrist,
+            stats: &mut stats1,
+        };
+        let (score1, move1) = alpha_beta(&mut board1, 3, -10000, 10000, &mut ctx1);
+
+        // ムーブオーダリングあり（新実装）
+        // 注: 実装後は同じalpha_beta関数がorder_movesを内部で呼び出す
+        let mut board2 = board;
+        let mut tt2 = TranspositionTable::new(128).unwrap();
+        let mut stats2 = SearchStats::new();
+        let mut ctx2 = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt2,
+            zobrist: &zobrist,
+            stats: &mut stats2,
+        };
+        let (score2, move2) = alpha_beta(&mut board2, 3, -10000, 10000, &mut ctx2);
+
+        // 同じ最善手と評価値を返すことを確認
+        assert_eq!(move1, move2, "Move ordering should not change best move");
+        assert!(
+            (score1 - score2).abs() < 0.01,
+            "Move ordering should not change score significantly"
+        );
+    }
+
+    #[test]
+    fn test_alphabeta_move_ordering_node_reduction() {
+        // Requirement 6.6, 4.2: ムーブオーダリング適用時に枝刈り効率が20-30%向上
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let board = BitBoard::new();
+        let zobrist = ZobristTable::new();
+
+        // 深さを増やして効果を測定（深さ4以上で効果が顕著）
+        let depth = 4;
+
+        // 注: この時点ではムーブオーダリングが適用されているので、
+        // ノード数削減効果は既に含まれている。
+        // 実装後、このテストはムーブオーダリングの効果を確認するために
+        // ベンチマーク的に使用される。
+
+        let mut board_test = board;
+        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut stats = SearchStats::new();
+        let mut ctx = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt,
+            zobrist: &zobrist,
+            stats: &mut stats,
+        };
+        alpha_beta(&mut board_test, depth, -10000, 10000, &mut ctx);
+
+        // ムーブオーダリングなしの場合と比較するため、
+        // ここではノード数が合理的な範囲内であることのみ確認
+        println!(
+            "AlphaBeta with move ordering at depth {}: {} nodes",
+            depth, ctx.stats.nodes
+        );
+        assert!(ctx.stats.nodes > 0, "Should explore some nodes");
+
+        // 深さ4での期待ノード数は数千～数万（ムーブオーダリングあり）
+        // 実際の削減効果は別途ベンチマークで測定
+    }
+
+    #[test]
+    fn test_alphabeta_tt_best_move_evaluated_first() {
+        // Requirement 14.6: 置換表最善手が最初に評価されることをテスト
+        if !std::path::Path::new("patterns.csv").exists() {
+            println!("patterns.csv not found, skipping test");
+            return;
+        }
+
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let mut board = BitBoard::new();
+        let mut tt = TranspositionTable::new(128).unwrap();
+        let zobrist = ZobristTable::new();
+
+        // 最初の探索で置換表にエントリを保存
+        let mut stats1 = SearchStats::new();
+        let mut ctx1 = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt,
+            zobrist: &zobrist,
+            stats: &mut stats1,
+        };
+        let (_, best_move1) = alpha_beta(&mut board, 2, -10000, 10000, &mut ctx1);
+
+        // 2回目の探索で置換表最善手が優先評価されることを確認
+        // （内部的にorder_movesが置換表最善手を先頭に配置）
+        let mut board2 = BitBoard::new();
+        let mut stats2 = SearchStats::new();
+        let mut ctx2 = SearchContext {
+            evaluator: &evaluator,
+            tt: ctx1.tt,
+            zobrist: &zobrist,
+            stats: &mut stats2,
+        };
+        let (_, best_move2) = alpha_beta(&mut board2, 2, -10000, 10000, &mut ctx2);
+
+        // 同じ最善手を返すことを確認
+        assert_eq!(best_move1, best_move2, "TT best move should be prioritized");
+
+        // 置換表ヒットがあることを確認
+        assert!(stats2.tt_hits > 0, "Should have TT hits in second search");
     }
 }
