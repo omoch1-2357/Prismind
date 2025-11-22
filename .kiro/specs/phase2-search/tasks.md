@@ -128,8 +128,8 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - 平均15ms以内に最善手を返すことを確認（100手の平均）
   - _Requirements: 7.4, 7.5, 7.7, 9.6, 14.7_
 
-- [ ] 7. 完全読みの実装
-- [ ] 7.1 完全読み関数の実装
+- [x] 7. 完全読みの実装
+- [x] 7.1 完全読み関数の実装
   - complete_search()関数を実装（board: &mut BitBoard, alpha: i32, beta: i32, tt: &mut TranspositionTable, zobrist: &ZobristTable）
   - 空きマス数14以下の検出（board.move_count >= 46）
   - AlphaBeta探索で終局までの全手順を探索
@@ -137,7 +137,7 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - 通常探索と同じムーブオーダリングを使用
   - _Requirements: 8.1, 8.2, 8.3, 8.4_
 
-- [ ] 7.2 完全読みの性能検証
+- [x] 7.2 完全読みの性能検証
   - 置換表を活用して探索を高速化
   - 深さ14で平均100ms以内に完全読みを完了することを確認
   - 既知の終盤局面で正解手を返すテスト

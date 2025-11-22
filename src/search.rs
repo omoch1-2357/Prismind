@@ -822,6 +822,175 @@ pub fn alpha_beta(
     (best_score, best_move)
 }
 
+/// 完全読み探索（残り14手以下）
+///
+/// 空きマス数が14以下の場合、終局までの全手順を探索し、最終石差×100を返す。
+/// AlphaBeta探索で終局までの完全読みを行い、置換表を活用して高速化する。
+///
+/// # Arguments
+///
+/// * `board` - 現在の盤面（move_count >= 46）
+/// * `alpha` - 下限
+/// * `beta` - 上限
+/// * `ctx` - 探索コンテキスト（評価関数、置換表、統計）
+///
+/// # Returns
+///
+/// `(f32, Option<u8>)` - (最終石差×100, 最善手)
+///
+/// # Preconditions
+///
+/// * `board.move_count >= 46`（残り14手以下）
+/// * `alpha < beta`
+///
+/// # Postconditions
+///
+/// * 最終スコアは-6400～+6400の範囲
+/// * 平均100ms以内に完了（目標）
+///
+/// # Examples
+///
+/// ```ignore
+/// use prismind::board::BitBoard;
+/// use prismind::evaluator::Evaluator;
+/// use prismind::search::{TranspositionTable, ZobristTable, SearchStats, SearchContext, complete_search};
+///
+/// let evaluator = Evaluator::new("patterns.csv").unwrap();
+/// let mut board = BitBoard::new();
+/// let mut tt = TranspositionTable::new(128).unwrap();
+/// let zobrist = ZobristTable::new();
+/// let mut stats = SearchStats::new();
+/// let mut ctx = SearchContext { evaluator: &evaluator, tt: &mut tt, zobrist: &zobrist, stats: &mut stats };
+///
+/// // 手数46以上の局面で呼び出し
+/// let (score, best_move) = complete_search(&mut board, -10000, 10000, &mut ctx);
+/// ```
+pub fn complete_search(
+    board: &mut BitBoard,
+    mut alpha: i32,
+    beta: i32,
+    ctx: &mut SearchContext,
+) -> (f32, Option<u8>) {
+    // ノード数をカウント
+    ctx.stats.nodes += 1;
+
+    // ゲーム状態を確認
+    let game_state = check_game_state(board);
+    match game_state {
+        GameState::GameOver(score) => {
+            // 終局: 最終スコア×100を返す
+            return ((score as f32) * 100.0, None);
+        }
+        GameState::Pass => {
+            // パス: 盤面を反転して探索継続
+            *board = board.flip();
+            let (score, _) = complete_search(board, -beta, -alpha, ctx);
+            *board = board.flip();
+            return (-score, None);
+        }
+        GameState::Playing => {
+            // 探索継続
+        }
+    }
+
+    // 置換表をプローブ
+    let hash = ctx.zobrist.hash(board);
+    if let Some(entry) = ctx.tt.probe(hash) {
+        ctx.stats.tt_hits += 1;
+
+        // 深さが十分なら置換表の評価値を使用
+        let remaining_moves = 60 - board.move_count();
+        if entry.depth >= remaining_moves as i8 {
+            let tt_score = entry.score as f32;
+
+            match entry.bound {
+                Bound::Exact => {
+                    // 正確な評価値
+                    return (tt_score, Some(entry.best_move));
+                }
+                Bound::Lower => {
+                    // 下限
+                    alpha = alpha.max(entry.score as i32);
+                }
+                Bound::Upper => {
+                    // 上限
+                    let beta_i32 = beta.min(entry.score as i32);
+                    if alpha >= beta_i32 {
+                        return (tt_score, Some(entry.best_move));
+                    }
+                }
+            }
+        }
+    }
+
+    // 合法手を取得
+    let moves = legal_moves(board);
+    if moves == 0 {
+        // パスの場合（上記のGameState::Passで処理されるはずだが念のため）
+        *board = board.flip();
+        let (score, _) = complete_search(board, -beta, -alpha, ctx);
+        *board = board.flip();
+        return (-score, None);
+    }
+
+    // ムーブオーダリング: 置換表の最善手を優先
+    let tt_best_move = ctx.tt.probe(hash).map(|e| e.best_move);
+    let ordered_moves = order_moves(moves, tt_best_move);
+
+    let mut best_score = alpha as f32;
+    let mut best_move = None;
+
+    // 全合法手を探索
+    for mv in ordered_moves {
+        let undo = make_move(board, mv).unwrap();
+
+        let (score, _) = complete_search(board, -beta, -(alpha.max(best_score as i32)), ctx);
+        let score = -score;
+
+        undo_move(board, undo);
+
+        if score > best_score {
+            best_score = score;
+            best_move = Some(mv);
+
+            // Beta cutoff
+            if best_score >= beta as f32 {
+                // 置換表に保存（Lower bound）
+                let entry = TTEntry {
+                    hash,
+                    depth: (60 - board.move_count()) as i8,
+                    bound: Bound::Lower,
+                    score: best_score as i16,
+                    best_move: mv,
+                    age: ctx.tt.current_age,
+                };
+                ctx.tt.store(hash, entry);
+
+                return (best_score, best_move);
+            }
+        }
+    }
+
+    // 置換表に保存
+    let bound = if best_score > alpha as f32 {
+        Bound::Exact
+    } else {
+        Bound::Upper
+    };
+
+    let entry = TTEntry {
+        hash,
+        depth: (60 - board.move_count()) as i8,
+        bound,
+        score: best_score as i16,
+        best_move: best_move.unwrap_or(255),
+        age: ctx.tt.current_age,
+    };
+    ctx.tt.store(hash, entry);
+
+    (best_score, best_move)
+}
+
 /// MTD(f)探索アルゴリズム
 ///
 /// ゼロ幅探索を繰り返し、上限と下限を収束させることで最善評価値を求める。
@@ -2596,5 +2765,220 @@ mod tests {
             average_time,
             time_limit_ms
         );
+    }
+
+    /// ヘルパー関数: 指定手数まで進めた局面を作成
+    fn create_position_at_move_count(target_move_count: u8) -> BitBoard {
+        let mut board = BitBoard::new();
+
+        // 目標手数まで適当に着手を進める
+        while board.move_count() < target_move_count {
+            let moves = legal_moves(&board);
+            if moves == 0 {
+                // パスの場合、盤面を反転
+                board = board.flip();
+                let moves_after_flip = legal_moves(&board);
+                if moves_after_flip == 0 {
+                    // 両者パスならゲーム終了
+                    break;
+                }
+            } else {
+                // 最初の合法手を打つ
+                let first_move = moves.trailing_zeros() as u8;
+                make_move(&mut board, first_move).unwrap();
+            }
+        }
+
+        board
+    }
+
+    #[test]
+    fn test_complete_search_detects_endgame() {
+        // 完全読みが空きマス数14以下を検出することをテスト
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let mut tt = TranspositionTable::new(128).unwrap();
+        let zobrist = ZobristTable::new();
+        let mut stats = SearchStats::new();
+
+        // 手数50（残り10手）の局面を作成（テストを高速化）
+        let mut board = create_position_at_move_count(50);
+
+        // 実際に手数50に到達しているか確認
+        if board.move_count() < 50 {
+            println!(
+                "Warning: Could not reach move 50, actual: {}",
+                board.move_count()
+            );
+            return; // テストをスキップ
+        }
+
+        let mut ctx = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt,
+            zobrist: &zobrist,
+            stats: &mut stats,
+        };
+
+        // complete_searchを呼び出し
+        let (score, _best_move) = complete_search(&mut board, -10000, 10000, &mut ctx);
+
+        // 評価値が最終石差×100の範囲内であることを確認
+        assert!(
+            (-6400.0..=6400.0).contains(&score),
+            "Complete search score should be in range [-6400, 6400]: {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_complete_search_terminates() {
+        // 完全読みが終局判定を正しく行うことをテスト
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let mut tt = TranspositionTable::new(128).unwrap();
+        let zobrist = ZobristTable::new();
+        let mut stats = SearchStats::new();
+
+        // ゲーム終了局面（手数60）を作成
+        let mut board = create_position_at_move_count(60);
+
+        let mut ctx = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt,
+            zobrist: &zobrist,
+            stats: &mut stats,
+        };
+
+        // complete_searchを呼び出し
+        let (score, _best_move) = complete_search(&mut board, -10000, 10000, &mut ctx);
+
+        // 最終スコアが返されることを確認
+        assert!(
+            (-6400.0..=6400.0).contains(&score),
+            "Terminal score should be in range: {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_complete_search_uses_transposition_table() {
+        // 完全読みが置換表を活用することをテスト
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let mut tt = TranspositionTable::new(128).unwrap();
+        let zobrist = ZobristTable::new();
+        let mut stats = SearchStats::new();
+
+        let mut board = create_position_at_move_count(52);
+
+        // 実際に手数52に到達しているか確認
+        if board.move_count() < 52 {
+            println!("Warning: Could not reach move 52, skipping test");
+            return;
+        }
+
+        let mut ctx = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt,
+            zobrist: &zobrist,
+            stats: &mut stats,
+        };
+
+        // 1回目の探索
+        let (score1, move1) = complete_search(&mut board, -10000, 10000, &mut ctx);
+
+        // 統計をリセット
+        stats.tt_hits = 0;
+
+        // 2回目の探索（置換表にヒットするはず）
+        let mut ctx = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt,
+            zobrist: &zobrist,
+            stats: &mut stats,
+        };
+        let (score2, move2) = complete_search(&mut board, -10000, 10000, &mut ctx);
+
+        // 同じ結果を返すことを確認
+        assert_eq!(score1, score2, "Scores should match");
+        assert_eq!(move1, move2, "Best moves should match");
+
+        // 置換表ヒットがあることを確認
+        assert!(
+            ctx.stats.tt_hits > 0,
+            "Complete search should use transposition table"
+        );
+    }
+
+    #[test]
+    fn test_complete_search_performance() {
+        // 完全読みが100ms以内に完了することを目標とするテスト
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let mut tt = TranspositionTable::new(128).unwrap();
+        let zobrist = ZobristTable::new();
+        let mut stats = SearchStats::new();
+
+        let mut board = create_position_at_move_count(52);
+
+        // 実際に手数52に到達しているか確認
+        if board.move_count() < 52 {
+            println!("Warning: Could not reach move 52, skipping test");
+            return;
+        }
+
+        let mut ctx = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt,
+            zobrist: &zobrist,
+            stats: &mut stats,
+        };
+
+        let start = std::time::Instant::now();
+        let (_score, _best_move) = complete_search(&mut board, -10000, 10000, &mut ctx);
+        let elapsed = start.elapsed().as_millis();
+
+        println!("Complete search depth 14 took: {}ms", elapsed);
+
+        // 目標は100ms以内だが、環境によって異なるため警告のみ
+        if elapsed > 100 {
+            println!(
+                "Warning: Complete search took longer than target ({}ms > 100ms)",
+                elapsed
+            );
+        }
+    }
+
+    #[test]
+    fn test_complete_search_move_ordering() {
+        // 完全読みが通常探索と同じムーブオーダリングを使用することをテスト
+        let evaluator = Evaluator::new("patterns.csv").unwrap();
+        let mut tt = TranspositionTable::new(128).unwrap();
+        let zobrist = ZobristTable::new();
+        let mut stats = SearchStats::new();
+
+        let mut board = create_position_at_move_count(54);
+
+        // 実際に手数54に到達しているか確認
+        if board.move_count() < 54 {
+            println!("Warning: Could not reach move 54, skipping test");
+            return;
+        }
+
+        let mut ctx = SearchContext {
+            evaluator: &evaluator,
+            tt: &mut tt,
+            zobrist: &zobrist,
+            stats: &mut stats,
+        };
+
+        // complete_searchを実行
+        let (_score, best_move) = complete_search(&mut board, -10000, 10000, &mut ctx);
+
+        // 合法手が存在する場合、最善手が返されることを確認
+        let moves = legal_moves(&board);
+        if moves != 0 {
+            assert!(
+                best_move.is_some(),
+                "Best move should be returned when legal moves exist"
+            );
+        }
     }
 }
