@@ -144,8 +144,8 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - 時間超過時のヒューリスティック評価へのフォールバック
   - _Requirements: 8.5, 8.6, 14.8_
 
-- [ ] 8. Search統合APIの実装
-- [ ] 8.1 Search構造体の初期化
+- [x] 8. Search統合APIの実装
+- [x] 8.1 Search構造体の初期化
   - Search構造体を定義（evaluator: Evaluator, transposition_table: TranspositionTable, zobrist: ZobristTable）
   - Search::new()関数で評価関数とメモリサイズを引数として初期化
   - 置換表サイズが128-256MBの範囲内であることを検証
@@ -153,7 +153,7 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - 初期化失敗時にResult型でエラーを返す
   - _Requirements: 11.1, 11.2, 11.7, 13.2_
 
-- [ ] 8.2 Search::search()メソッドの実装
+- [x] 8.2 Search::search()メソッドの実装
   - search()メソッドを実装（board: &BitBoard, time_limit_ms: u64）
   - 探索開始時に置換表の世代を更新（increment_age）
   - 空きマス数14以下で完全読みモードに切り替え
@@ -161,7 +161,7 @@ Phase 2の探索アルゴリズム実装を、Negamax基本実装からMTD(f)最
   - SearchResultを返す（最善手、評価値、到達深さ、探索統計）
   - _Requirements: 11.3, 11.4, 11.5_
 
-- [ ] 8.3 探索統計の収集
+- [x] 8.3 探索統計の収集
   - 探索ノード数、置換表ヒット数、枝刈り回数を記録
   - 到達深さ、評価関数呼び出し回数、探索時間を記録
   - 置換表ヒット率（ヒット数÷総アクセス数）を計算

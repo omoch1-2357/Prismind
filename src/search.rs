@@ -1232,6 +1232,152 @@ pub fn iterative_deepening(
     )
 }
 
+/// Search統合API
+///
+/// Phase 3学習システムへの統合APIを提供する。
+/// 評価関数、置換表、Zobristハッシュを内部状態として保持し、
+/// 反復深化+MTD(f)+ムーブオーダリングを組み合わせた探索を実行する。
+pub struct Search {
+    /// 評価関数
+    evaluator: Evaluator,
+    /// 置換表
+    transposition_table: TranspositionTable,
+    /// Zobristハッシュテーブル
+    zobrist: ZobristTable,
+}
+
+impl Search {
+    /// 探索システムを初期化
+    ///
+    /// # Arguments
+    /// * `evaluator` - Phase 1評価関数
+    /// * `tt_size_mb` - 置換表サイズ（128-256MB）
+    ///
+    /// # Returns
+    /// Result<Search, SearchError> - 初期化成功時はSearch、失敗時はMemoryAllocationエラー
+    ///
+    /// # Example
+    /// ```no_run
+    /// use prismind::evaluator::Evaluator;
+    /// use prismind::search::Search;
+    ///
+    /// let evaluator = Evaluator::new("data/patterns.csv").unwrap();
+    /// let search = Search::new(evaluator, 128).unwrap();
+    /// ```
+    pub fn new(evaluator: Evaluator, tt_size_mb: usize) -> Result<Self, SearchError> {
+        // 置換表サイズの検証
+        if !(128..=256).contains(&tt_size_mb) {
+            return Err(SearchError::MemoryAllocation(format!(
+                "Invalid transposition table size: {}MB (must be 128-256MB)",
+                tt_size_mb
+            )));
+        }
+
+        // 置換表を初期化
+        let transposition_table = TranspositionTable::new(tt_size_mb)?;
+
+        // Zobristハッシュテーブルを初期化
+        let zobrist = ZobristTable::new();
+
+        Ok(Self {
+            evaluator,
+            transposition_table,
+            zobrist,
+        })
+    }
+
+    /// 指定時間制限内で最善手を探索
+    ///
+    /// # Arguments
+    /// * `board` - 現在の盤面
+    /// * `time_limit_ms` - 時間制限（ミリ秒、デフォルト15ms）
+    ///
+    /// # Returns
+    /// Result<SearchResult, SearchError> - 探索成功時は最善手と評価値、失敗時はエラー
+    ///
+    /// # Preconditions
+    /// * `board`は合法な盤面状態であること
+    /// * `time_limit_ms > 0`であること
+    ///
+    /// # Postconditions
+    /// * 返却される最善手は合法手であること
+    /// * 時間制限を超過しないこと（80%で次の深さをスキップ）
+    ///
+    /// # Example
+    /// ```no_run
+    /// use prismind::board::BitBoard;
+    /// use prismind::evaluator::Evaluator;
+    /// use prismind::search::Search;
+    ///
+    /// let evaluator = Evaluator::new("data/patterns.csv").unwrap();
+    /// let mut search = Search::new(evaluator, 128).unwrap();
+    /// let board = BitBoard::new();
+    ///
+    /// let result = search.search(&board, 15).unwrap();
+    /// println!("Best move: {:?}, Score: {}", result.best_move, result.score);
+    /// ```
+    pub fn search(
+        &mut self,
+        board: &BitBoard,
+        time_limit_ms: u64,
+    ) -> Result<SearchResult, SearchError> {
+        // 時間制限の検証
+        if time_limit_ms == 0 {
+            return Err(SearchError::InvalidBoardState(
+                "time_limit_ms must be positive".to_string(),
+            ));
+        }
+
+        // 探索開始時に置換表の世代を更新
+        self.transposition_table.increment_age();
+
+        // 盤面を可変コピー（探索中に着手・戻しを繰り返すため）
+        let mut board_copy = *board;
+
+        // 空きマス数を計算（黒石と白石のビットカウント）
+        let occupied = board_copy.black | board_copy.white_mask();
+        let empty_count = 64 - occupied.count_ones();
+
+        // 空きマス数14以下で完全読みモードに切り替え
+        if empty_count <= 14 {
+            // 完全読みモード
+            let start_time = std::time::Instant::now();
+            let mut stats = SearchStats::new();
+
+            let mut ctx = SearchContext {
+                evaluator: &self.evaluator,
+                tt: &mut self.transposition_table,
+                zobrist: &self.zobrist,
+                stats: &mut stats,
+            };
+
+            let (score, best_move) = complete_search(&mut board_copy, -10000, 10000, &mut ctx);
+
+            let elapsed_ms = start_time.elapsed().as_millis() as u64;
+
+            Ok(SearchResult::new(
+                best_move,
+                score,
+                empty_count as u8,
+                stats.nodes,
+                stats.tt_hits,
+                elapsed_ms,
+            ))
+        } else {
+            // 通常探索モード（反復深化+MTD(f)+ムーブオーダリング）
+            let result = iterative_deepening(
+                &mut board_copy,
+                time_limit_ms,
+                &self.evaluator,
+                &mut self.transposition_table,
+                &self.zobrist,
+            );
+
+            Ok(result)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2980,5 +3126,180 @@ mod tests {
                 "Best move should be returned when legal moves exist"
             );
         }
+    }
+
+    // ========================================
+    // Task 8: Search Integration API Tests
+    // ========================================
+
+    #[test]
+    fn test_search_new_valid_size() {
+        // 有効なサイズ（128MB）でSearch構造体を初期化できることを確認
+        let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
+
+        let search_result = Search::new(evaluator, 128);
+        assert!(
+            search_result.is_ok(),
+            "Search initialization should succeed with 128MB"
+        );
+    }
+
+    #[test]
+    fn test_search_new_max_size() {
+        // 最大サイズ（256MB）でSearch構造体を初期化できることを確認
+        let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
+
+        let search_result = Search::new(evaluator, 256);
+        assert!(
+            search_result.is_ok(),
+            "Search initialization should succeed with 256MB"
+        );
+    }
+
+    #[test]
+    fn test_search_new_invalid_size_too_small() {
+        // 無効なサイズ（127MB）でSearchが失敗することを確認
+        let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
+
+        let search_result = Search::new(evaluator, 127);
+        assert!(
+            search_result.is_err(),
+            "Search initialization should fail with 127MB"
+        );
+
+        if let Err(SearchError::MemoryAllocation(msg)) = search_result {
+            assert!(
+                msg.contains("128-256MB"),
+                "Error message should mention valid range"
+            );
+        } else {
+            panic!("Expected MemoryAllocation error");
+        }
+    }
+
+    #[test]
+    fn test_search_new_invalid_size_too_large() {
+        // 無効なサイズ（257MB）でSearchが失敗することを確認
+        let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
+
+        let search_result = Search::new(evaluator, 257);
+        assert!(
+            search_result.is_err(),
+            "Search initialization should fail with 257MB"
+        );
+
+        if let Err(SearchError::MemoryAllocation(msg)) = search_result {
+            assert!(
+                msg.contains("128-256MB"),
+                "Error message should mention valid range"
+            );
+        } else {
+            panic!("Expected MemoryAllocation error");
+        }
+    }
+
+    #[test]
+    fn test_search_search_initial_board() {
+        // 初期盤面での探索が成功することを確認
+        let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
+
+        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+
+        let board = BitBoard::new();
+        let result = search.search(&board, 15);
+
+        assert!(result.is_ok(), "Search should succeed on initial board");
+
+        let search_result = result.unwrap();
+        assert!(
+            search_result.best_move.is_some(),
+            "Best move should be found"
+        );
+        assert!(
+            search_result.elapsed_ms <= 50,
+            "Search should complete within time limit (actual: {}ms)",
+            search_result.elapsed_ms
+        );
+        assert!(
+            search_result.depth > 0,
+            "Search should reach at least depth 1"
+        );
+    }
+
+    #[test]
+    fn test_search_search_updates_transposition_table_age() {
+        // 探索開始時に置換表の世代が更新されることを確認
+        let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
+
+        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+
+        let board = BitBoard::new();
+
+        // 最初の探索
+        let result1 = search.search(&board, 15);
+        assert!(result1.is_ok(), "First search should succeed");
+
+        // 2回目の探索（世代が更新されるべき）
+        let result2 = search.search(&board, 15);
+        assert!(result2.is_ok(), "Second search should succeed");
+    }
+
+    #[test]
+    fn test_search_search_endgame_mode() {
+        // 空きマス数14以下で完全読みモードに切り替わることを確認
+        let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
+
+        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+
+        // 終盤局面を構築（move_count >= 46）
+        let mut board = BitBoard::new();
+
+        // 46手進める（簡易的な実装）
+        let mut move_count = 0;
+        while move_count < 46 {
+            let moves = legal_moves(&board);
+            if moves == 0 {
+                break;
+            }
+
+            // 最初の合法手を選択
+            let first_move = moves.trailing_zeros() as u8;
+            let _ = make_move(&mut board, first_move);
+            move_count += 1;
+        }
+
+        if move_count >= 46 {
+            let result = search.search(&board, 100);
+            assert!(result.is_ok(), "Search should succeed in endgame mode");
+
+            let search_result = result.unwrap();
+            // 完全読みモードでは時間制限が長くても許容
+            assert!(
+                search_result.elapsed_ms <= 150,
+                "Endgame search should complete within extended time limit"
+            );
+        }
+    }
+
+    #[test]
+    fn test_search_statistics_collection() {
+        // 探索統計が正しく収集されることを確認
+        let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
+
+        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+
+        let board = BitBoard::new();
+        let result = search.search(&board, 15).expect("Search should succeed");
+
+        // 統計情報が収集されていることを確認
+        assert!(result.nodes_searched > 0, "Nodes should be searched");
+        assert!(result.elapsed_ms > 0, "Elapsed time should be recorded");
+
+        // ヒット率が計算可能であることを確認
+        let hit_rate = result.tt_hit_rate();
+        assert!(
+            (0.0..=1.0).contains(&hit_rate),
+            "Hit rate should be between 0 and 1"
+        );
     }
 }
