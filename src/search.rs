@@ -240,7 +240,11 @@ pub enum Bound {
 }
 
 /// 置換表エントリ
+///
+/// キャッシュライン最適化のため、64バイトにアライメント。
+/// ARM64とx86_64の両方でキャッシュミス率を低減。
 #[derive(Clone, Copy, Debug)]
+#[repr(C, align(64))]
 pub struct TTEntry {
     /// Zobristハッシュ（完全一致確認用）
     pub hash: u64,
@@ -254,6 +258,24 @@ pub struct TTEntry {
     pub best_move: u8,
     /// 世代情報
     pub age: u8,
+    /// パディング（64バイトアライメント用）
+    _padding: [u8; 50],
+}
+
+impl TTEntry {
+    /// 新しい置換表エントリを作成
+    #[inline]
+    pub fn new(hash: u64, depth: i8, bound: Bound, score: i16, best_move: u8, age: u8) -> Self {
+        Self {
+            hash,
+            depth,
+            bound,
+            score,
+            best_move,
+            age,
+            _padding: [0; 50],
+        }
+    }
 }
 
 /// 置換表
@@ -507,6 +529,137 @@ fn is_edge(pos: u8) -> bool {
     row == 0 || row == 7 || col == 0 || col == 7
 }
 
+/// ブランチレス版: 角の位置か判定（ビット演算のみ）
+///
+/// # Arguments
+/// * `pos` - 盤面の位置（0-63）
+///
+/// # Returns
+/// 角の位置（0, 7, 56, 63）ならtrue
+///
+/// # Implementation
+/// ビットマスクを使用したブランチレス実装で分岐予測ミスを最小化
+///
+/// # Requirements
+/// * 16.3: ビット演算で角、X打ち、辺の判定を最適化
+#[inline]
+fn is_corner_branchless(pos: u8) -> bool {
+    // 角のビットマスク: 0, 7, 56, 63
+    const CORNER_MASK: u64 = (1u64 << 0) | (1u64 << 7) | (1u64 << 56) | (1u64 << 63);
+    (CORNER_MASK & (1u64 << pos)) != 0
+}
+
+/// ブランチレス版: X打ち（角の隣）か判定（ビット演算のみ）
+///
+/// # Arguments
+/// * `pos` - 盤面の位置（0-63）
+///
+/// # Returns
+/// X打ち位置（1, 8, 9, 6, 14, 15, 48, 49, 54, 55, 57, 62）ならtrue
+///
+/// # Implementation
+/// ビットマスクを使用したブランチレス実装で分岐予測ミスを最小化
+///
+/// # Requirements
+/// * 16.3: ビット演算で角、X打ち、辺の判定を最適化
+#[inline]
+fn is_x_square_branchless(pos: u8) -> bool {
+    // X打ちのビットマスク
+    const X_MASK: u64 = (1u64 << 1)
+        | (1u64 << 8)
+        | (1u64 << 9)
+        | (1u64 << 6)
+        | (1u64 << 14)
+        | (1u64 << 15)
+        | (1u64 << 48)
+        | (1u64 << 49)
+        | (1u64 << 54)
+        | (1u64 << 55)
+        | (1u64 << 57)
+        | (1u64 << 62);
+    (X_MASK & (1u64 << pos)) != 0
+}
+
+/// ブランチレス版: 辺の位置か判定（ビット演算のみ）
+///
+/// # Arguments
+/// * `pos` - 盤面の位置（0-63）
+///
+/// # Returns
+/// 辺の位置（角を除く）ならtrue
+///
+/// # Implementation
+/// ビット演算で行と列を判定し、分岐を最小化
+///
+/// # Requirements
+/// * 16.3: ビット演算で角、X打ち、辺の判定を最適化
+#[inline]
+fn is_edge_branchless(pos: u8) -> bool {
+    let row = pos >> 3; // pos / 8
+    let col = pos & 7; // pos % 8
+
+    // 角を除外（ビット演算のみ）
+    let is_corner = is_corner_branchless(pos);
+
+    // 辺判定: row == 0 or row == 7 or col == 0 or col == 7
+    let is_on_edge = (row == 0) | (row == 7) | (col == 0) | (col == 7);
+
+    is_on_edge & !is_corner
+}
+
+/// ブランチレス版: 合法手を優先順位付けしてソート
+///
+/// # Arguments
+/// * `moves` - 合法手のビットマスク
+/// * `tt_best_move` - 置換表の最善手（Option<u8>）
+///
+/// # Returns
+/// 優先度順にソートされた合法手リスト（Vec<u8>）
+///
+/// # Implementation
+/// ビット演算による優先度計算で分岐予測ミスを最小化
+///
+/// # Requirements
+/// * 16.3: ブランチレス実装で分岐予測ミスを最小化
+/// * 16.4: ARM64とx86_64での性能比較
+pub fn order_moves_branchless(moves: u64, tt_best_move: Option<u8>) -> Vec<u8> {
+    if moves == 0 {
+        return Vec::new();
+    }
+
+    // 合法手をVecに変換
+    let mut move_list = Vec::new();
+    let mut move_bits = moves;
+    while move_bits != 0 {
+        let pos = move_bits.trailing_zeros() as u8;
+        move_list.push(pos);
+        move_bits &= move_bits - 1;
+    }
+
+    // ブランチレス優先度付け関数
+    let priority = |pos: u8| -> i32 {
+        // TT最善手の判定（ブランチレス）
+        let tt_bonus = if let Some(tt_move) = tt_best_move {
+            ((pos == tt_move) as i32) * 1000
+        } else {
+            0
+        };
+
+        // 各種位置判定（ビット演算のみ）
+        let corner_bonus = (is_corner_branchless(pos) as i32) * 100;
+        let x_penalty = (is_x_square_branchless(pos) as i32) * (-60);
+        let edge_bonus = (is_edge_branchless(pos) as i32) * 50;
+        let base_score = 10;
+
+        tt_bonus + corner_bonus + x_penalty + edge_bonus + base_score
+    };
+
+    // 優先順位でソート（降順）
+    move_list.sort_by_key(|b| std::cmp::Reverse(priority(*b)));
+
+    move_list
+}
+
 /// 合法手を優先順位付けしてソート
 ///
 /// # Arguments
@@ -683,14 +836,7 @@ pub fn alpha_beta(
     if depth == 0 {
         let score = ctx.evaluator.evaluate(board);
         // 置換表に保存
-        let entry = TTEntry {
-            hash,
-            depth: 0,
-            bound: Bound::Exact,
-            score: score as i16,
-            best_move: 255,
-            age: ctx.tt.current_age,
-        };
+        let entry = TTEntry::new(hash, 0, Bound::Exact, score as i16, 255, ctx.tt.current_age);
         ctx.tt.store(hash, entry);
         return (score, None);
     }
@@ -702,14 +848,14 @@ pub fn alpha_beta(
             let final_score_val = final_score(board);
             let score = (final_score_val as f32) * 100.0;
             // 置換表に保存
-            let entry = TTEntry {
+            let entry = TTEntry::new(
                 hash,
-                depth: depth as i8,
-                bound: Bound::Exact,
-                score: score as i16,
-                best_move: 255,
-                age: ctx.tt.current_age,
-            };
+                depth as i8,
+                Bound::Exact,
+                score as i16,
+                255,
+                ctx.tt.current_age,
+            );
             ctx.tt.store(hash, entry);
             return (score, None);
         }
@@ -720,14 +866,14 @@ pub fn alpha_beta(
             // 符号反転（Negamaxの原則）
             let negated_score = -score;
             // 置換表に保存
-            let entry = TTEntry {
+            let entry = TTEntry::new(
                 hash,
-                depth: depth as i8,
-                bound: Bound::Exact,
-                score: negated_score as i16,
-                best_move: 255,
-                age: ctx.tt.current_age,
-            };
+                depth as i8,
+                Bound::Exact,
+                negated_score as i16,
+                255,
+                ctx.tt.current_age,
+            );
             ctx.tt.store(hash, entry);
             return (negated_score, None);
         }
@@ -788,14 +934,14 @@ pub fn alpha_beta(
             // beta cut（枝刈り）
             if alpha >= beta {
                 // 置換表に下限（Lower Bound）を保存
-                let entry = TTEntry {
+                let entry = TTEntry::new(
                     hash,
-                    depth: depth as i8,
-                    bound: Bound::Lower,
-                    score: best_score as i16,
-                    best_move: best_move.unwrap_or(255),
-                    age: ctx.tt.current_age,
-                };
+                    depth as i8,
+                    Bound::Lower,
+                    best_score as i16,
+                    best_move.unwrap_or(255),
+                    ctx.tt.current_age,
+                );
                 ctx.tt.store(hash, entry);
                 return (best_score, best_move);
             }
@@ -809,14 +955,14 @@ pub fn alpha_beta(
         Bound::Exact // 正確な評価値
     };
 
-    let entry = TTEntry {
+    let entry = TTEntry::new(
         hash,
-        depth: depth as i8,
+        depth as i8,
         bound,
-        score: best_score as i16,
-        best_move: best_move.unwrap_or(255),
-        age: ctx.tt.current_age,
-    };
+        best_score as i16,
+        best_move.unwrap_or(255),
+        ctx.tt.current_age,
+    );
     ctx.tt.store(hash, entry);
 
     (best_score, best_move)
@@ -956,14 +1102,14 @@ pub fn complete_search(
             // Beta cutoff
             if best_score >= beta as f32 {
                 // 置換表に保存（Lower bound）
-                let entry = TTEntry {
+                let entry = TTEntry::new(
                     hash,
-                    depth: (60 - board.move_count()) as i8,
-                    bound: Bound::Lower,
-                    score: best_score as i16,
-                    best_move: mv,
-                    age: ctx.tt.current_age,
-                };
+                    (60 - board.move_count()) as i8,
+                    Bound::Lower,
+                    best_score as i16,
+                    mv,
+                    ctx.tt.current_age,
+                );
                 ctx.tt.store(hash, entry);
 
                 return (best_score, best_move);
@@ -978,14 +1124,14 @@ pub fn complete_search(
         Bound::Upper
     };
 
-    let entry = TTEntry {
+    let entry = TTEntry::new(
         hash,
-        depth: (60 - board.move_count()) as i8,
+        (60 - board.move_count()) as i8,
         bound,
-        score: best_score as i16,
-        best_move: best_move.unwrap_or(255),
-        age: ctx.tt.current_age,
-    };
+        best_score as i16,
+        best_move.unwrap_or(255),
+        ctx.tt.current_age,
+    );
     ctx.tt.store(hash, entry);
 
     (best_score, best_move)
@@ -1453,14 +1599,7 @@ mod tests {
         let board = BitBoard::new();
         let hash = zobrist.hash(&board);
 
-        let entry = TTEntry {
-            hash,
-            depth: 6,
-            bound: Bound::Exact,
-            score: 100,
-            best_move: 19,
-            age: 0,
-        };
+        let entry = TTEntry::new(hash, 6, Bound::Exact, 100, 19, 0);
 
         tt.store(hash, entry);
 
@@ -1481,25 +1620,11 @@ mod tests {
         let hash = 0x123456789ABCDEF0;
 
         // 浅い探索結果を保存
-        let entry1 = TTEntry {
-            hash,
-            depth: 3,
-            bound: Bound::Exact,
-            score: 50,
-            best_move: 10,
-            age: 0,
-        };
+        let entry1 = TTEntry::new(hash, 3, Bound::Exact, 50, 10, 0);
         tt.store(hash, entry1);
 
         // 深い探索結果で上書き
-        let entry2 = TTEntry {
-            hash,
-            depth: 6,
-            bound: Bound::Exact,
-            score: 100,
-            best_move: 19,
-            age: 0,
-        };
+        let entry2 = TTEntry::new(hash, 6, Bound::Exact, 100, 19, 0);
         tt.store(hash, entry2);
 
         let result = tt.probe(hash).unwrap();
@@ -1513,14 +1638,7 @@ mod tests {
         let mut tt = TranspositionTable::new(128).unwrap();
         let hash = 0x123456789ABCDEF0;
 
-        let entry1 = TTEntry {
-            hash,
-            depth: 6,
-            bound: Bound::Exact,
-            score: 100,
-            best_move: 19,
-            age: 0,
-        };
+        let entry1 = TTEntry::new(hash, 6, Bound::Exact, 100, 19, 0);
         tt.store(hash, entry1);
 
         // 世代を更新
@@ -1528,14 +1646,7 @@ mod tests {
         assert_eq!(tt.current_age, 1, "世代が1になるべき");
 
         // 浅い探索でも異なる世代なら置換される
-        let entry2 = TTEntry {
-            hash,
-            depth: 3,
-            bound: Bound::Exact,
-            score: 50,
-            best_move: 10,
-            age: 1,
-        };
+        let entry2 = TTEntry::new(hash, 3, Bound::Exact, 50, 10, 1);
         tt.store(hash, entry2);
 
         let result = tt.probe(hash).unwrap();
@@ -3300,6 +3411,306 @@ mod tests {
         assert!(
             (0.0..=1.0).contains(&hit_rate),
             "Hit rate should be between 0 and 1"
+        );
+    }
+
+    #[test]
+    fn test_ttentry_cache_line_alignment() {
+        // TTEntryが64バイトにアライメントされていることを検証（ARM64最適化）
+        use std::mem;
+
+        // アライメントが64バイトであることを確認
+        assert_eq!(
+            mem::align_of::<TTEntry>(),
+            64,
+            "TTEntry should be aligned to 64 bytes for cache line optimization"
+        );
+
+        // サイズが64バイトであることを確認
+        assert_eq!(
+            mem::size_of::<TTEntry>(),
+            64,
+            "TTEntry should be exactly 64 bytes to fit in one cache line"
+        );
+    }
+
+    #[test]
+    fn test_transposition_table_cache_alignment() {
+        // 置換表のエントリ配列がキャッシュラインにアライメントされていることを検証
+        let tt = TranspositionTable::new(128).expect("Failed to create transposition table");
+
+        // 置換表が正常に動作することを確認（アライメント変更後も機能するか）
+        let zobrist = ZobristTable::new();
+        let board = BitBoard::new();
+        let hash = zobrist.hash(&board);
+
+        let entry = TTEntry::new(hash, 6, Bound::Exact, 100, 19, 0);
+
+        // storeとprobeが正常に動作することを確認
+        let mut tt_mut = tt;
+        tt_mut.store(hash, entry);
+
+        let result = tt_mut.probe(hash);
+        assert!(
+            result.is_some(),
+            "Aligned transposition table should work correctly"
+        );
+
+        let retrieved = result.unwrap();
+        assert_eq!(retrieved.hash, hash);
+        assert_eq!(retrieved.depth, 6);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn test_arm64_specific_alignment() {
+        // ARM64環境でのキャッシュラインアライメント検証
+        use std::mem;
+
+        let _tt = TranspositionTable::new(128).expect("Failed to create transposition table");
+
+        // TTEntryのアライメントがARM64のキャッシュライン（64バイト）に一致することを確認
+        assert_eq!(
+            mem::align_of::<TTEntry>(),
+            64,
+            "ARM64 cache line alignment should be 64 bytes"
+        );
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_x86_64_compatibility() {
+        // x86_64環境でもアライメント最適化が動作することを確認
+        use std::mem;
+
+        let _tt = TranspositionTable::new(128).expect("Failed to create transposition table");
+
+        // x86_64でも64バイトアライメントが適用されることを確認
+        assert_eq!(
+            mem::align_of::<TTEntry>(),
+            64,
+            "x86_64 should also support 64-byte alignment"
+        );
+    }
+
+    // ========== Task 9.2: ムーブオーダリングのブランチレス実装 Tests (TDD - RED) ==========
+
+    #[test]
+    fn test_is_corner_branchless() {
+        // Requirement 16.3: ビット演算で角の判定を最適化
+        // 角の位置: 0, 7, 56, 63
+
+        assert!(is_corner_branchless(0), "Position 0 is a corner");
+        assert!(is_corner_branchless(7), "Position 7 is a corner");
+        assert!(is_corner_branchless(56), "Position 56 is a corner");
+        assert!(is_corner_branchless(63), "Position 63 is a corner");
+
+        // 非角位置
+        assert!(!is_corner_branchless(1), "Position 1 is not a corner");
+        assert!(!is_corner_branchless(8), "Position 8 is not a corner");
+        assert!(!is_corner_branchless(20), "Position 20 is not a corner");
+        assert!(!is_corner_branchless(55), "Position 55 is not a corner");
+    }
+
+    #[test]
+    fn test_is_x_square_branchless() {
+        // Requirement 16.3: ビット演算でX打ちの判定を最適化
+        // X打ち: 1, 8, 9, 6, 14, 15, 48, 49, 54, 55, 57, 62
+
+        let x_positions = [1, 8, 9, 6, 14, 15, 48, 49, 54, 55, 57, 62];
+        for &pos in &x_positions {
+            assert!(
+                is_x_square_branchless(pos),
+                "Position {} should be X-square",
+                pos
+            );
+        }
+
+        // 非X打ち位置
+        assert!(!is_x_square_branchless(0), "Position 0 is not X-square");
+        assert!(!is_x_square_branchless(20), "Position 20 is not X-square");
+        assert!(!is_x_square_branchless(63), "Position 63 is not X-square");
+    }
+
+    #[test]
+    fn test_is_edge_branchless() {
+        // Requirement 16.3: ビット演算で辺の判定を最適化
+        // 辺: row == 0 or row == 7 or col == 0 or col == 7 (角を除く)
+
+        // 上辺（角を除く）
+        for col in 1..7 {
+            assert!(is_edge_branchless(col), "Position {} on top edge", col);
+        }
+
+        // 下辺（角を除く）
+        for col in 1..7 {
+            assert!(
+                is_edge_branchless(56 + col),
+                "Position {} on bottom edge",
+                56 + col
+            );
+        }
+
+        // 左辺（角を除く）
+        for row in 1..7 {
+            assert!(
+                is_edge_branchless(row * 8),
+                "Position {} on left edge",
+                row * 8
+            );
+        }
+
+        // 右辺（角を除く）
+        for row in 1..7 {
+            assert!(
+                is_edge_branchless(row * 8 + 7),
+                "Position {} on right edge",
+                row * 8 + 7
+            );
+        }
+
+        // 非辺位置
+        assert!(!is_edge_branchless(0), "Corner 0 is not counted as edge");
+        assert!(!is_edge_branchless(7), "Corner 7 is not counted as edge");
+        assert!(!is_edge_branchless(20), "Position 20 is not edge");
+        assert!(!is_edge_branchless(27), "Position 27 is not edge");
+    }
+
+    #[test]
+    fn test_branchless_functions_match_original() {
+        // ブランチレス版がオリジナル版と同じ結果を返すことを確認
+
+        for pos in 0..64 {
+            assert_eq!(
+                is_corner_branchless(pos),
+                is_corner(pos),
+                "is_corner mismatch at position {}",
+                pos
+            );
+
+            assert_eq!(
+                is_x_square_branchless(pos),
+                is_x_square(pos),
+                "is_x_square mismatch at position {}",
+                pos
+            );
+
+            assert_eq!(
+                is_edge_branchless(pos),
+                is_edge(pos),
+                "is_edge mismatch at position {}",
+                pos
+            );
+        }
+    }
+
+    #[test]
+    fn test_order_moves_branchless_same_result() {
+        // Requirement 16.3: ブランチレス実装が同じ結果を返すことを確認
+
+        // 様々な合法手パターンでテスト
+        let test_cases = vec![
+            (
+                (1u64 << 0) | (1u64 << 7) | (1u64 << 19) | (1u64 << 56),
+                None,
+            ),
+            (
+                (1u64 << 1) | (1u64 << 9) | (1u64 << 20) | (1u64 << 30),
+                None,
+            ),
+            (
+                (1u64 << 2) | (1u64 << 3) | (1u64 << 20) | (1u64 << 58),
+                Some(20),
+            ),
+            (
+                (1u64 << 0) | (1u64 << 1) | (1u64 << 3) | (1u64 << 20) | (1u64 << 27),
+                Some(27),
+            ),
+        ];
+
+        for (moves, tt_move) in test_cases {
+            let original = order_moves(moves, tt_move);
+            let branchless = order_moves_branchless(moves, tt_move);
+
+            assert_eq!(
+                original, branchless,
+                "Branchless ordering should match original for moves={:064b}, tt_move={:?}",
+                moves, tt_move
+            );
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn test_arm64_branchless_performance() {
+        // Requirement 16.4: ARM64での性能比較
+        // このテストは性能測定のためのプレースホルダー
+        // 実際の性能比較はベンチマークで実施
+
+        use std::time::Instant;
+
+        let moves = (1u64 << 0) | (1u64 << 7) | (1u64 << 19) | (1u64 << 20) | (1u64 << 27);
+        let tt_move = Some(27);
+
+        // ウォームアップ
+        for _ in 0..100 {
+            let _ = order_moves_branchless(moves, tt_move);
+        }
+
+        // 性能測定
+        let iterations = 10000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = order_moves_branchless(moves, tt_move);
+        }
+        let elapsed = start.elapsed();
+
+        println!(
+            "ARM64 branchless move ordering: {} iterations in {:?}",
+            iterations, elapsed
+        );
+        println!("Average time per call: {:?}", elapsed / iterations);
+
+        // 基本的なサニティチェック（10000回が50ms未満で完了することを期待）
+        assert!(
+            elapsed.as_millis() < 50,
+            "Branchless ordering should be fast (< 50ms for 10k iterations)"
+        );
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_x86_64_branchless_performance() {
+        // Requirement 16.4: x86_64での性能比較
+
+        use std::time::Instant;
+
+        let moves = (1u64 << 0) | (1u64 << 7) | (1u64 << 19) | (1u64 << 20) | (1u64 << 27);
+        let tt_move = Some(27);
+
+        // ウォームアップ
+        for _ in 0..100 {
+            let _ = order_moves_branchless(moves, tt_move);
+        }
+
+        // 性能測定
+        let iterations = 10000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = order_moves_branchless(moves, tt_move);
+        }
+        let elapsed = start.elapsed();
+
+        println!(
+            "x86_64 branchless move ordering: {} iterations in {:?}",
+            iterations, elapsed
+        );
+        println!("Average time per call: {:?}", elapsed / iterations);
+
+        // 基本的なサニティチェック（10000回が50ms未満で完了することを期待）
+        assert!(
+            elapsed.as_millis() < 50,
+            "Branchless ordering should be fast (< 50ms for 10k iterations)"
         );
     }
 }
