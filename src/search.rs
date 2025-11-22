@@ -327,7 +327,7 @@ impl TranspositionTable {
     /// * `hash` - Zobristハッシュ
     ///
     /// # Returns
-    /// Option<TTEntry> - ヒット時はエントリ、ミス時はNone
+    /// `Option<TTEntry>` - ヒット時はエントリ、ミス時はNone
     pub fn probe(&self, hash: u64) -> Option<TTEntry> {
         let index = (hash as usize) & (self.size - 1);
 
@@ -389,7 +389,7 @@ impl TranspositionTable {
 ///
 /// # Returns
 ///
-/// (評価値, 最善手のOption<u8>)
+/// (評価値, 最善手の`Option<u8>`)
 ///
 /// # Negamaxの原則
 ///
@@ -611,10 +611,10 @@ fn is_edge_branchless(pos: u8) -> bool {
 ///
 /// # Arguments
 /// * `moves` - 合法手のビットマスク
-/// * `tt_best_move` - 置換表の最善手（Option<u8>）
+/// * `tt_best_move` - 置換表の最善手（`Option<u8>`）
 ///
 /// # Returns
-/// 優先度順にソートされた合法手リスト（Vec<u8>）
+/// 優先度順にソートされた合法手リスト（`Vec<u8>`）
 ///
 /// # Implementation
 /// ビット演算による優先度計算で分岐予測ミスを最小化
@@ -664,10 +664,10 @@ pub fn order_moves_branchless(moves: u64, tt_best_move: Option<u8>) -> Vec<u8> {
 ///
 /// # Arguments
 /// * `moves` - 合法手のビットマスク
-/// * `tt_best_move` - 置換表の最善手（Option<u8>）
+/// * `tt_best_move` - 置換表の最善手（`Option<u8>`）
 ///
 /// # Returns
-/// Vec<u8> - 優先順位順の合法手リスト
+/// `Vec<u8>` - 優先順位順の合法手リスト
 ///
 /// # 優先順位
 /// 1. 置換表最善手（TT best move）
@@ -747,7 +747,7 @@ pub fn order_moves(moves: u64, tt_best_move: Option<u8>) -> Vec<u8> {
 ///
 /// # Returns
 ///
-/// (評価値, 最善手のOption<u8>)
+/// (評価値, 最善手の`Option<u8>`)
 ///
 /// # Alpha-Betaの原則
 ///
@@ -1151,7 +1151,7 @@ pub fn complete_search(
 ///
 /// # Returns
 ///
-/// (評価値, 最善手のOption<u8>)
+/// (評価値, 最善手の`Option<u8>`)
 ///
 /// # MTD(f)の原則
 ///
