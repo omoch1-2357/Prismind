@@ -391,6 +391,7 @@ fn alpha_beta(
     tt: &mut TranspositionTable,
     zobrist: &ZobristTable,
 ) -> (i32, Option<u8>) {
+    let original_alpha = alpha;
     let hash = zobrist.hash(board);
     
     // 置換表プローブ

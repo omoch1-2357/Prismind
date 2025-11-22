@@ -103,7 +103,8 @@ echo ""
 
 # Run perf stat on the search benchmark binary
 # Note: We use the compiled benchmark binary directly to avoid overhead
-BENCH_BINARY="target/release/deps/search_bench-$(ls -t target/release/deps/search_bench-* 2>/dev/null | grep -v '\.d$' | head -1 | xargs basename)"
+# Find the most recent search_bench binary (excluding .d files)
+BENCH_BINARY=$(find target/release/deps -maxdepth 1 -name 'search_bench-*' -type f ! -name '*.d' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2- | xargs basename)
 
 if [[ ! -f "target/release/deps/${BENCH_BINARY}" ]]; then
     echo -e "${YELLOW}Warning: Compiled benchmark binary not found${NC}"
@@ -134,9 +135,11 @@ echo ""
 parse_perf_output() {
     local report=$1
 
-    # Cache metrics
-    local cache_refs=$(grep -oP '\d+(?=\s+cache-references)' "$report" | head -1)
-    local cache_misses=$(grep -oP '\d+(?=\s+cache-misses)' "$report" | head -1)
+    # Cache metrics (declare separately for better error handling)
+    local cache_refs
+    cache_refs=$(grep -oP '\d+(?=\s+cache-references)' "$report" | head -1)
+    local cache_misses
+    cache_misses=$(grep -oP '\d+(?=\s+cache-misses)' "$report" | head -1)
 
     # Branch metrics
     local branches=$(grep -oP '\d+(?=\s+branches)' "$report" | head -1)

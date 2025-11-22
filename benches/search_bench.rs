@@ -216,7 +216,7 @@ fn bench_performance_targets(c: &mut Criterion) {
 
             // 目標: 深さ6で10ms以内
             assert!(
-                result.elapsed_ms <= 10 || result.depth >= 6,
+                result.elapsed_ms <= 10 && result.depth >= 6,
                 "Target not met: depth {} in {}ms (target: depth 6 in 10ms)",
                 result.depth,
                 result.elapsed_ms

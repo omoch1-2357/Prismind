@@ -82,21 +82,15 @@ jobs:
         id: extract_metrics_x86
         run: |
           # Parse perf results
-          if [[ -f perf_results/perf_report_*.txt ]]; then
-            REPORT_FILE=$(ls -t perf_results/perf_report_*.txt | head -1)
+          if REPORT_FILE=$(compgen -G 'perf_results/perf_report_*.txt' | head -n1); then
             echo "Found report: $REPORT_FILE"
 
             # Extract cache miss rate
             CACHE_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | head -1 | grep -oP '\d+\.\d+' || echo "N/A")
-            echo "cache_miss_rate=$CACHE_MISS_RATE" >> $GITHUB_OUTPUT
-
+            echo "cache_miss_rate=$CACHE_MISS_RATE" >> "$GITHUB_OUTPUT"
             # Extract branch miss rate
             BRANCH_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | tail -1 | grep -oP '\d+\.\d+' || echo "N/A")
-            echo "branch_miss_rate=$BRANCH_MISS_RATE" >> $GITHUB_OUTPUT
-
-            # Extract IPC
-            IPC=$(grep "IPC:" "$REPORT_FILE" | grep -oP '\d+\.\d+' || echo "N/A")
-            echo "ipc=$IPC" >> $GITHUB_OUTPUT
+            echo "branch_miss_rate=$BRANCH_MISS_RATE" >> "$GITHUB_OUTPUT"
 
             # Status checks
             CACHE_STATUS="UNKNOWN"
@@ -126,11 +120,11 @@ jobs:
             echo "  IPC: $IPC"
           else
             echo "No report file found"
-            echo "cache_miss_rate=N/A" >> $GITHUB_OUTPUT
-            echo "branch_miss_rate=N/A" >> $GITHUB_OUTPUT
-            echo "ipc=N/A" >> $GITHUB_OUTPUT
-            echo "cache_status=ERROR" >> $GITHUB_OUTPUT
-            echo "branch_status=ERROR" >> $GITHUB_OUTPUT
+            echo "cache_miss_rate=N/A" >> "$GITHUB_OUTPUT"
+            echo "branch_miss_rate=N/A" >> "$GITHUB_OUTPUT"
+            echo "ipc=N/A" >> "$GITHUB_OUTPUT"
+            echo "cache_status=ERROR" >> "$GITHUB_OUTPUT"
+            echo "branch_status=ERROR" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Upload x86_64 perf results
