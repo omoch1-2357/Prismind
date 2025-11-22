@@ -1,0 +1,346 @@
+name: Perf Profiling (Linux)
+
+# Task 10.2: Performance profiling with perf tools
+# Measures cache miss rate and branch prediction miss rate on Linux (x86_64 and ARM64)
+
+on:
+  # Run on pull requests to phase2-search branch
+  pull_request:
+    branches: [phase2-search, main]
+    paths:
+      - 'src/search/**'
+      - 'benches/search_bench.rs'
+      - 'scripts/perf_profile.sh'
+      - '.github/workflows/perf-profile.yml'
+  # Allow manual trigger
+  workflow_dispatch:
+  # Run weekly to track performance trends
+  schedule:
+    - cron: '0 0 * * 0' # Every Sunday at midnight UTC
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # x86_64 Linux profiling
+  perf-profile-x86-64:
+    name: Perf Profile (x86_64 Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: perf-x86-64-cache
+
+      - name: Install perf tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y linux-tools-common linux-tools-generic linux-tools-$(uname -r) || \
+          sudo apt-get install -y linux-tools-$(uname -r) || \
+          echo "Warning: Could not install exact kernel version tools, using generic"
+
+      - name: Verify perf installation
+        run: |
+          echo "Perf version:"
+          perf --version || echo "perf not found"
+          echo ""
+          echo "Architecture:"
+          uname -m
+          echo ""
+          echo "Kernel:"
+          uname -r
+
+      - name: Set perf permissions
+        run: |
+          # Allow perf to run without sudo for this session
+          echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
+          echo 0 | sudo tee /proc/sys/kernel/kptr_restrict
+
+      - name: Build benchmarks
+        run: |
+          cargo build --release --benches
+
+      - name: Run perf profiling (x86_64)
+        run: |
+          # The script uses: perf stat -e cache-references,cache-misses,branches,branch-misses,instructions,cycles
+          chmod +x scripts/perf_profile.sh
+          ./scripts/perf_profile.sh 2>&1 | tee perf_x86_64.log
+
+      - name: Extract performance metrics
+        id: extract_metrics_x86
+        run: |
+          # Parse perf results
+          if [[ -f perf_results/perf_report_*.txt ]]; then
+            REPORT_FILE=$(ls -t perf_results/perf_report_*.txt | head -1)
+            echo "Found report: $REPORT_FILE"
+
+            # Extract cache miss rate
+            CACHE_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | head -1 | grep -oP '\d+\.\d+' || echo "N/A")
+            echo "cache_miss_rate=$CACHE_MISS_RATE" >> $GITHUB_OUTPUT
+
+            # Extract branch miss rate
+            BRANCH_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | tail -1 | grep -oP '\d+\.\d+' || echo "N/A")
+            echo "branch_miss_rate=$BRANCH_MISS_RATE" >> $GITHUB_OUTPUT
+
+            # Extract IPC
+            IPC=$(grep "IPC:" "$REPORT_FILE" | grep -oP '\d+\.\d+' || echo "N/A")
+            echo "ipc=$IPC" >> $GITHUB_OUTPUT
+
+            # Status checks
+            CACHE_STATUS="UNKNOWN"
+            BRANCH_STATUS="UNKNOWN"
+
+            if [[ "$CACHE_MISS_RATE" != "N/A" ]]; then
+              if (( $(echo "$CACHE_MISS_RATE <= 50" | bc -l) )); then
+                CACHE_STATUS="PASS"
+              else
+                CACHE_STATUS="FAIL"
+              fi
+            fi
+            echo "cache_status=$CACHE_STATUS" >> $GITHUB_OUTPUT
+
+            if [[ "$BRANCH_MISS_RATE" != "N/A" ]]; then
+              if (( $(echo "$BRANCH_MISS_RATE <= 1" | bc -l) )); then
+                BRANCH_STATUS="PASS"
+              else
+                BRANCH_STATUS="FAIL"
+              fi
+            fi
+            echo "branch_status=$BRANCH_STATUS" >> $GITHUB_OUTPUT
+
+            echo "Extracted metrics:"
+            echo "  Cache Miss Rate: $CACHE_MISS_RATE% ($CACHE_STATUS)"
+            echo "  Branch Miss Rate: $BRANCH_MISS_RATE% ($BRANCH_STATUS)"
+            echo "  IPC: $IPC"
+          else
+            echo "No report file found"
+            echo "cache_miss_rate=N/A" >> $GITHUB_OUTPUT
+            echo "branch_miss_rate=N/A" >> $GITHUB_OUTPUT
+            echo "ipc=N/A" >> $GITHUB_OUTPUT
+            echo "cache_status=ERROR" >> $GITHUB_OUTPUT
+            echo "branch_status=ERROR" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload x86_64 perf results
+        uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: perf-results-x86-64
+          path: |
+            perf_results/
+            perf_x86_64.log
+          retention-days: 30
+
+  # ARM64 Linux profiling (using macOS ARM64 runners)
+  perf-profile-arm64-macos:
+    name: Perf Profile (ARM64 macOS)
+    runs-on: macos-latest
+    # Note: macOS doesn't have perf, but we can use Instruments or dtrace
+    # For now, we'll focus on Linux ARM64 when available
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: perf-arm64-macos-cache
+
+      - name: Check architecture
+        run: |
+          echo "Architecture: $(uname -m)"
+          echo "Rust target: $(rustc -vV | grep host | cut -d' ' -f2)"
+          echo ""
+          echo "Note: macOS does not support 'perf' tool"
+          echo "Use 'instruments' or 'dtrace' for profiling on macOS"
+          echo ""
+          echo "For Linux ARM64 profiling, use GitHub's ARM64 runners or self-hosted ARM64 Linux"
+
+      - name: Run Criterion benchmarks (alternative profiling)
+        run: |
+          echo "Running Criterion benchmarks as alternative to perf..."
+          cargo bench --bench search_bench -- --verbose 2>&1 | tee bench_arm64_macos.log
+
+      - name: Upload ARM64 macOS benchmark results
+        uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: bench-results-arm64-macos
+          path: |
+            bench_arm64_macos.log
+            target/criterion/
+          retention-days: 30
+
+  # Generate comparison report
+  generate-comparison-report:
+    name: Generate Performance Comparison Report
+    runs-on: ubuntu-latest
+    needs: [perf-profile-x86-64, perf-profile-arm64-macos]
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download x86_64 results
+        uses: actions/download-artifact@v5
+        with:
+          name: perf-results-x86-64
+          path: perf-x86-64/
+        continue-on-error: true
+
+      - name: Download ARM64 results
+        uses: actions/download-artifact@v5
+        with:
+          name: bench-results-arm64-macos
+          path: bench-arm64/
+        continue-on-error: true
+
+      - name: Generate comparison report
+        run: |
+          # Create performance comparison report
+          cat > performance_comparison.md << 'EOF'
+          # Performance Comparison Report: x86_64 vs ARM64
+
+          ## Task 10.2: Perf Profiling Results
+
+          ### Performance Targets
+          - **Cache Miss Rate**: ≤50%
+          - **Branch Prediction Miss Rate**: ≤1%
+
+          ---
+
+          ## x86_64 Linux Results
+
+          EOF
+
+          # Append x86_64 results if available
+          if [[ -f perf-x86-64/perf_x86_64.log ]]; then
+            echo "### Perf Stat Output" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
+            grep -A 20 "Performance Analysis" perf-x86-64/perf_x86_64.log >> performance_comparison.md || echo "No analysis found" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
+            echo "" >> performance_comparison.md
+          else
+            echo "*x86_64 results not available*" >> performance_comparison.md
+            echo "" >> performance_comparison.md
+          fi
+
+          # ARM64 section
+          cat >> performance_comparison.md << 'EOF'
+          ---
+
+          ## ARM64 Results
+
+          *Note: ARM64 Linux perf profiling requires ARM64 Linux runners (not available in free GitHub Actions)*
+          *ARM64 macOS results use Criterion benchmarks instead of perf tools*
+
+          EOF
+
+          if [[ -f bench-arm64/bench_arm64_macos.log ]]; then
+            echo "### Criterion Benchmark Output (ARM64 macOS)" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
+            grep -A 10 "time:" bench-arm64/bench_arm64_macos.log | head -30 >> performance_comparison.md || echo "No benchmark data" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
+            echo "" >> performance_comparison.md
+          else
+            echo "*ARM64 results not available*" >> performance_comparison.md
+            echo "" >> performance_comparison.md
+          fi
+
+          # Footer
+          cat >> performance_comparison.md << 'EOF'
+          ---
+
+          ## Recommendations
+
+          ### For complete ARM64 Linux perf profiling:
+          1. Use self-hosted ARM64 Linux runner (e.g., OCI Ampere A1)
+          2. Or use GitHub Enterprise Cloud with ARM64 Linux runners
+          3. Or run manually: `./scripts/perf_profile.sh` on ARM64 Linux
+
+          ### Links
+          - [Perf profiling documentation](../../docs/perf_profiling.md)
+          - [Performance report template](../../docs/perf_report_template.md)
+
+          EOF
+
+          cat performance_comparison.md
+
+      - name: Upload comparison report
+        uses: actions/upload-artifact@v5
+        with:
+          name: performance-comparison-report
+          path: performance_comparison.md
+          retention-days: 90
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+
+            let reportContent = '';
+            try {
+              reportContent = fs.readFileSync('performance_comparison.md', 'utf8');
+            } catch (err) {
+              reportContent = '## Performance Comparison Report\n\n*Report generation failed*\n\nCheck workflow logs for details.';
+            }
+
+            const commentBody = `## Perf Profiling Results (Task 10.2)\n\n${reportContent}\n\n**Download detailed results:** [View Artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComments = comments.filter(comment =>
+              comment.user.login === 'github-actions[bot]' &&
+              comment.body.includes('Perf Profiling Results (Task 10.2)')
+            );
+
+            if (botComments.length > 0) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComments[0].id,
+                body: commentBody
+              });
+
+              // Delete duplicates
+              for (let i = 1; i < botComments.length; i++) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComments[i].id
+                });
+              }
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody
+              });
+            }
