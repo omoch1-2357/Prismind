@@ -1293,13 +1293,14 @@ pub fn mtdf(
 /// let mut tt = TranspositionTable::new(128).unwrap();
 /// let zobrist = ZobristTable::new();
 ///
-/// let result = iterative_deepening(&mut board, 15, &evaluator, &mut tt, &zobrist);
+/// let result = iterative_deepening(&mut board, 15, None, &evaluator, &mut tt, &zobrist);
 /// println!("Best move: {:?}, Depth: {}, Time: {}ms",
 ///          result.best_move, result.depth, result.elapsed_ms);
 /// ```
 pub fn iterative_deepening(
     board: &mut BitBoard,
     time_limit_ms: u64,
+    max_depth: Option<u8>,
     evaluator: &Evaluator,
     tt: &mut TranspositionTable,
     zobrist: &ZobristTable,
@@ -1318,14 +1319,17 @@ pub fn iterative_deepening(
     // 初期推測値として評価関数の結果を使用
     let mut guess = evaluator.evaluate(board) as i32;
 
-    // 深さ1から開始し、時間制限まで深さを1ずつ増やす
-    for depth in 1..=60 {
+    // 最大深さを決定（指定がなければ60）
+    let max_iter_depth = max_depth.unwrap_or(60);
+
+    // 深さ1から開始し、時間制限または最大深さまで深さを1ずつ増やす
+    for depth in 1..=max_iter_depth {
         // 経過時間を確認
         let elapsed = start_time.elapsed().as_millis() as u64;
 
         // 時間制限の80%を使用した際に次の深さの探索をスキップ
-        // ただし、深さ1は必ず実行する
-        if depth > 1 && elapsed >= (time_limit_ms * 8) / 10 {
+        // ただし、深さ1は必ず実行する、また最大深さが指定されている場合はその深さまで実行
+        if depth > 1 && max_depth.is_none() && elapsed >= (time_limit_ms * 8) / 10 {
             break;
         }
 
@@ -1437,6 +1441,7 @@ impl Search {
     /// # Arguments
     /// * `board` - 現在の盤面
     /// * `time_limit_ms` - 時間制限（ミリ秒、デフォルト15ms）
+    /// * `max_depth` - 最大探索深さ（`None`の場合は時間制限のみで制御）
     ///
     /// # Returns
     /// Result<SearchResult, SearchError> - 探索成功時は最善手と評価値、失敗時はエラー
@@ -1447,7 +1452,8 @@ impl Search {
     ///
     /// # Postconditions
     /// * 返却される最善手は合法手であること
-    /// * 時間制限を超過しないこと（80%で次の深さをスキップ）
+    /// * `max_depth`が`None`の場合、時間制限を超過しないこと（80%で次の深さをスキップ）
+    /// * `max_depth`が`Some(d)`の場合、深さ`d`に到達したら探索を終了
     ///
     /// # Example
     /// ```no_run
@@ -1459,13 +1465,19 @@ impl Search {
     /// let mut search = Search::new(evaluator, 128).unwrap();
     /// let board = BitBoard::new();
     ///
-    /// let result = search.search(&board, 15).unwrap();
+    /// // 時間制限のみで探索（最大深さは自動）
+    /// let result = search.search(&board, 15, None).unwrap();
     /// println!("Best move: {:?}, Score: {}", result.best_move, result.score);
+    ///
+    /// // 最大深さを指定して探索
+    /// let result_depth6 = search.search(&board, 1000, Some(6)).unwrap();
+    /// println!("Depth 6 search: {:?}", result_depth6);
     /// ```
     pub fn search(
         &mut self,
         board: &BitBoard,
         time_limit_ms: u64,
+        max_depth: Option<u8>,
     ) -> Result<SearchResult, SearchError> {
         // 時間制限の検証
         if time_limit_ms == 0 {
@@ -1514,6 +1526,7 @@ impl Search {
             let result = iterative_deepening(
                 &mut board_copy,
                 time_limit_ms,
+                max_depth,
                 &self.evaluator,
                 &mut self.transposition_table,
                 &self.zobrist,
@@ -2782,7 +2795,14 @@ mod tests {
         let zobrist = ZobristTable::new();
         let time_limit_ms = 1000; // 1秒（十分な時間）
 
-        let result = iterative_deepening(&mut board, time_limit_ms, &evaluator, &mut tt, &zobrist);
+        let result = iterative_deepening(
+            &mut board,
+            time_limit_ms,
+            None,
+            &evaluator,
+            &mut tt,
+            &zobrist,
+        );
 
         // 基本的な動作確認
         assert!(result.best_move.is_some(), "Should return a best move");
@@ -2809,7 +2829,14 @@ mod tests {
         let zobrist = ZobristTable::new();
         let time_limit_ms = 500;
 
-        let result = iterative_deepening(&mut board, time_limit_ms, &evaluator, &mut tt, &zobrist);
+        let result = iterative_deepening(
+            &mut board,
+            time_limit_ms,
+            None,
+            &evaluator,
+            &mut tt,
+            &zobrist,
+        );
 
         // 深さが1以上であることを確認
         assert!(
@@ -2835,7 +2862,14 @@ mod tests {
         let zobrist = ZobristTable::new();
         let time_limit_ms = 500;
 
-        let result = iterative_deepening(&mut board, time_limit_ms, &evaluator, &mut tt, &zobrist);
+        let result = iterative_deepening(
+            &mut board,
+            time_limit_ms,
+            None,
+            &evaluator,
+            &mut tt,
+            &zobrist,
+        );
 
         // 反復深化が複数の深さを完了した場合、MTD(f)の初期推測値として前回のスコアを使用
         // （内部的に実装されるため、ここでは探索が成功することを確認）
@@ -2858,7 +2892,14 @@ mod tests {
         let time_limit_ms = 200; // より現実的な時間制限
 
         let start = std::time::Instant::now();
-        let result = iterative_deepening(&mut board, time_limit_ms, &evaluator, &mut tt, &zobrist);
+        let result = iterative_deepening(
+            &mut board,
+            time_limit_ms,
+            None,
+            &evaluator,
+            &mut tt,
+            &zobrist,
+        );
         let actual_elapsed = start.elapsed().as_millis() as u64;
 
         // 報告された経過時間が実際の時間と近いことを確認（±20ms）
@@ -2895,7 +2936,14 @@ mod tests {
         let zobrist = ZobristTable::new();
         let time_limit_ms = 100; // より現実的な時間制限
 
-        let result = iterative_deepening(&mut board, time_limit_ms, &evaluator, &mut tt, &zobrist);
+        let result = iterative_deepening(
+            &mut board,
+            time_limit_ms,
+            None,
+            &evaluator,
+            &mut tt,
+            &zobrist,
+        );
 
         // 最低でも深さ1は完了することを確認
         assert!(result.depth >= 1, "Should complete at least depth 1");
@@ -2928,7 +2976,14 @@ mod tests {
         let zobrist = ZobristTable::new();
         let time_limit_ms = 100;
 
-        let result = iterative_deepening(&mut board, time_limit_ms, &evaluator, &mut tt, &zobrist);
+        let result = iterative_deepening(
+            &mut board,
+            time_limit_ms,
+            None,
+            &evaluator,
+            &mut tt,
+            &zobrist,
+        );
 
         // 最善手が返されることを確認（最後に完了した深さの結果）
         assert!(
@@ -2959,7 +3014,14 @@ mod tests {
         let zobrist = ZobristTable::new();
         let time_limit_ms = 200;
 
-        let result = iterative_deepening(&mut board, time_limit_ms, &evaluator, &mut tt, &zobrist);
+        let result = iterative_deepening(
+            &mut board,
+            time_limit_ms,
+            None,
+            &evaluator,
+            &mut tt,
+            &zobrist,
+        );
 
         // SearchResultが到達深さを含むことを確認
         assert!(result.depth > 0, "Should return reached depth");
@@ -2997,8 +3059,14 @@ mod tests {
             let mut board = BitBoard::new();
             let mut tt = TranspositionTable::new(128).unwrap();
 
-            let result =
-                iterative_deepening(&mut board, time_limit_ms, &evaluator, &mut tt, &zobrist);
+            let result = iterative_deepening(
+                &mut board,
+                time_limit_ms,
+                None,
+                &evaluator,
+                &mut tt,
+                &zobrist,
+            );
 
             // 最善手が返されることを確認
             assert!(result.best_move.is_some(), "Should return a best move");
@@ -3317,7 +3385,7 @@ mod tests {
         let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
 
         let board = BitBoard::new();
-        let result = search.search(&board, 15);
+        let result = search.search(&board, 15, None);
 
         assert!(result.is_ok(), "Search should succeed on initial board");
 
@@ -3348,11 +3416,11 @@ mod tests {
         let board = BitBoard::new();
 
         // 最初の探索
-        let result1 = search.search(&board, 15);
+        let result1 = search.search(&board, 15, None);
         assert!(result1.is_ok(), "First search should succeed");
 
         // 2回目の探索（世代が更新されるべき）
-        let result2 = search.search(&board, 15);
+        let result2 = search.search(&board, 15, None);
         assert!(result2.is_ok(), "Second search should succeed");
     }
 
@@ -3381,7 +3449,7 @@ mod tests {
         }
 
         if move_count >= 46 {
-            let result = search.search(&board, 100);
+            let result = search.search(&board, 100, None);
             assert!(result.is_ok(), "Search should succeed in endgame mode");
 
             let search_result = result.unwrap();
@@ -3401,7 +3469,9 @@ mod tests {
         let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
 
         let board = BitBoard::new();
-        let result = search.search(&board, 15).expect("Search should succeed");
+        let result = search
+            .search(&board, 15, None)
+            .expect("Search should succeed");
 
         // 統計情報が収集されていることを確認
         assert!(result.nodes_searched > 0, "Nodes should be searched");
@@ -3735,7 +3805,7 @@ mod tests {
         for i in 0..num_searches {
             let board = BitBoard::new();
             let start = Instant::now();
-            let result = search.search(&board, 15).expect("Search failed");
+            let result = search.search(&board, 15, None).expect("Search failed");
             let elapsed = start.elapsed().as_millis() as u64;
 
             total_elapsed += elapsed;
@@ -3773,7 +3843,7 @@ mod tests {
 
         // 十分な時間制限で深さ6まで到達させる
         let start = Instant::now();
-        let result = search.search(&board, 1000).expect("Search failed");
+        let result = search.search(&board, 1000, None).expect("Search failed");
         let elapsed = start.elapsed().as_millis() as u64;
 
         println!("\nAlphaBeta depth 6 performance:");
@@ -3805,7 +3875,7 @@ mod tests {
         let board = BitBoard::new();
 
         // MTD(f)での探索（現在の実装）
-        let result = search.search(&board, 1000).expect("Search failed");
+        let result = search.search(&board, 1000, None).expect("Search failed");
         let mtdf_nodes = result.nodes_searched;
 
         println!("\nMTD(f) vs AlphaBeta node reduction:");
@@ -3838,7 +3908,7 @@ mod tests {
             make_move(&mut board, mv).expect("Failed to make move");
         }
 
-        let result = search.search(&board, 15).expect("Search failed");
+        let result = search.search(&board, 15, None).expect("Search failed");
         let hit_rate = result.tt_hit_rate();
 
         println!("\nTransposition table hit rate (midgame):");
@@ -3878,7 +3948,7 @@ mod tests {
         }
 
         let start = Instant::now();
-        let result = search.search(&board, 1000).expect("Search failed");
+        let result = search.search(&board, 1000, None).expect("Search failed");
         let elapsed = start.elapsed().as_millis() as u64;
 
         println!("\nComplete search performance (depth 14):");
@@ -3906,7 +3976,7 @@ mod tests {
         let board = BitBoard::new();
 
         // ムーブオーダリング適用時のノード数を測定
-        let result = search.search(&board, 1000).expect("Search failed");
+        let result = search.search(&board, 1000, None).expect("Search failed");
         let ordered_nodes = result.nodes_searched;
 
         println!("\nMove ordering efficiency:");
@@ -3980,7 +4050,7 @@ mod tests {
         for _ in 0..num_searches {
             let board = BitBoard::new();
             let start = Instant::now();
-            let result = search.search(&board, 15).expect("Search failed");
+            let result = search.search(&board, 15, None).expect("Search failed");
             let elapsed = start.elapsed().as_millis() as u64;
 
             total_time += elapsed;

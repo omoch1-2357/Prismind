@@ -24,16 +24,15 @@ fn bench_initial_position(c: &mut Criterion) {
 
     // 深さ1-6の探索時間を測定
     for depth in 1..=6 {
-        group.bench_with_input(BenchmarkId::new("depth", depth), &depth, |b, _depth| {
+        group.bench_with_input(BenchmarkId::new("depth", depth), &depth, |b, &depth| {
             b.iter(|| {
                 // 深さ制限を実現するため、時間制限を十分大きくする
-                // 実際には反復深化で指定深さに到達したら停止する
+                // max_depthパラメータで指定深さに到達したら停止する
                 let result = search
-                    .search(black_box(&board), black_box(1000))
+                    .search(black_box(&board), black_box(10000), Some(depth))
                     .expect("Search failed");
 
                 // 到達深さが目標深さに達していることを確認
-                // （実装ではtime_limitではなくdepth指定が必要な場合は修正）
                 black_box(result)
             });
         });
@@ -88,10 +87,10 @@ fn bench_midgame_position(c: &mut Criterion) {
 
     // 深さ6-8の探索時間を測定
     for depth in 6..=8 {
-        group.bench_with_input(BenchmarkId::new("depth", depth), &depth, |b, _depth| {
+        group.bench_with_input(BenchmarkId::new("depth", depth), &depth, |b, &depth| {
             b.iter(|| {
                 let result = search
-                    .search(black_box(&board), black_box(1000))
+                    .search(black_box(&board), black_box(10000), Some(depth))
                     .expect("Search failed");
 
                 black_box(result)
@@ -123,7 +122,7 @@ fn bench_tt_hit_rate(c: &mut Criterion) {
     c.bench_function("tt_hit_rate_midgame", |b| {
         b.iter(|| {
             let result = search
-                .search(black_box(&board), black_box(15))
+                .search(black_box(&board), black_box(15), None)
                 .expect("Search failed");
 
             // ヒット率を計算
@@ -154,7 +153,7 @@ fn bench_pruning_efficiency(c: &mut Criterion) {
     c.bench_function("pruning_efficiency_depth6", |b| {
         b.iter(|| {
             let result = search
-                .search(black_box(&board), black_box(1000))
+                .search(black_box(&board), black_box(1000), None)
                 .expect("Search failed");
 
             // 探索ノード数をログ出力
@@ -180,7 +179,7 @@ fn bench_nodes_per_second(c: &mut Criterion) {
     c.bench_function("nodes_per_second", |b| {
         b.iter(|| {
             let result = search
-                .search(black_box(&board), black_box(100))
+                .search(black_box(&board), black_box(100), None)
                 .expect("Search failed");
 
             // npsを計算
@@ -211,7 +210,7 @@ fn bench_performance_targets(c: &mut Criterion) {
 
         b.iter(|| {
             let result = search
-                .search(black_box(&board), black_box(1000))
+                .search(black_box(&board), black_box(1000), None)
                 .expect("Search failed");
 
             // 目標: 深さ6で10ms以内
@@ -241,7 +240,7 @@ fn bench_performance_targets(c: &mut Criterion) {
 
         b.iter(|| {
             let result = search
-                .search(black_box(&board), black_box(15))
+                .search(black_box(&board), black_box(15), None)
                 .expect("Search failed");
 
             // 目標: 深さ6で15ms以内
