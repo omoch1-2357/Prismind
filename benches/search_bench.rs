@@ -110,7 +110,7 @@ fn bench_performance_targets(c: &mut Criterion) {
 
         b.iter(|| {
             let result = search
-                .search(black_box(&board), black_box(1000), None)
+                .search(black_box(&board), black_box(1000), Some(6))
                 .expect("Search failed");
 
             // 目標: 深さ6で10ms以内

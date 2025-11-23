@@ -270,8 +270,8 @@ jobs:
           3. Or run manually: `./scripts/perf_profile.sh` on ARM64 Linux
 
           ### Links
-          - [Perf profiling documentation](../../docs/perf_profiling.md)
-          - [Performance report template](../../docs/perf_report_template.md)
+          - [Perf profiling documentation](docs/perf_profiling.md)
+          - [Performance report template](docs/perf_report_template.md)
 
           EOF
 

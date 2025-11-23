@@ -1329,7 +1329,7 @@ pub fn iterative_deepening(
 
         // 時間制限の80%を使用した際に次の深さの探索をスキップ
         // ただし、深さ1は必ず実行する、また最大深さが指定されている場合はその深さまで実行
-        if depth > 1 && max_depth.is_none() && elapsed >= (time_limit_ms * 8) / 10 {
+        if depth > 1 && elapsed >= (time_limit_ms * 8) / 10 {
             break;
         }
 
