@@ -17,7 +17,7 @@ fn setup_evaluator() -> Evaluator {
 /// 目標: 深さ6で10ms以内
 fn bench_initial_position(c: &mut Criterion) {
     let evaluator = setup_evaluator();
-    let mut search = Search::new(evaluator, 128).expect("Failed to create search");
+    let mut search = Search::new(evaluator, 256).expect("Failed to create search");
     let board = BitBoard::new();
 
     let mut group = c.benchmark_group("search_initial_position");
@@ -46,7 +46,7 @@ fn bench_initial_position(c: &mut Criterion) {
 /// 目標: 深さ6で15ms以内
 fn bench_midgame_position(c: &mut Criterion) {
     let evaluator = setup_evaluator();
-    let mut search = Search::new(evaluator, 128).expect("Failed to create search");
+    let mut search = Search::new(evaluator, 256).expect("Failed to create search");
 
     // 中盤局面を作成（手数20程度の局面）
     // ここでは簡易的に初期盤面から数手進めた局面を使用
@@ -106,7 +106,7 @@ fn bench_midgame_position(c: &mut Criterion) {
 /// 目標: 中盤以降で50%以上
 fn bench_tt_hit_rate(c: &mut Criterion) {
     let evaluator = setup_evaluator();
-    let mut search = Search::new(evaluator, 128).expect("Failed to create search");
+    let mut search = Search::new(evaluator, 256).expect("Failed to create search");
 
     // 中盤局面（上記と同じ）
     let mut board = BitBoard::new();
@@ -146,7 +146,7 @@ fn bench_tt_hit_rate(c: &mut Criterion) {
 /// AlphaBetaとムーブオーダリングの効果を測定
 fn bench_pruning_efficiency(c: &mut Criterion) {
     let evaluator = setup_evaluator();
-    let mut search = Search::new(evaluator, 128).expect("Failed to create search");
+    let mut search = Search::new(evaluator, 256).expect("Failed to create search");
 
     let board = BitBoard::new();
 
@@ -172,7 +172,7 @@ fn bench_pruning_efficiency(c: &mut Criterion) {
 /// 目標: 高いnpsほど探索が高速
 fn bench_nodes_per_second(c: &mut Criterion) {
     let evaluator = setup_evaluator();
-    let mut search = Search::new(evaluator, 128).expect("Failed to create search");
+    let mut search = Search::new(evaluator, 256).expect("Failed to create search");
 
     let board = BitBoard::new();
 
@@ -205,7 +205,7 @@ fn bench_nodes_per_second(c: &mut Criterion) {
 fn bench_performance_targets(c: &mut Criterion) {
     c.bench_function("target_initial_depth6_10ms", |b| {
         let evaluator = setup_evaluator();
-        let mut search = Search::new(evaluator, 128).expect("Failed to create search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create search");
         let board = BitBoard::new();
 
         b.iter(|| {
@@ -227,7 +227,7 @@ fn bench_performance_targets(c: &mut Criterion) {
 
     c.bench_function("target_midgame_depth6_15ms", |b| {
         let evaluator = setup_evaluator();
-        let mut search = Search::new(evaluator, 128).expect("Failed to create search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create search");
 
         // 中盤局面
         let mut board = BitBoard::new();
@@ -240,13 +240,15 @@ fn bench_performance_targets(c: &mut Criterion) {
 
         b.iter(|| {
             let result = search
-                .search(black_box(&board), black_box(15), None)
+                .search(black_box(&board), black_box(1000), None)
                 .expect("Search failed");
 
             // 目標: 深さ6で15ms以内
-            println!(
-                "Midgame search: depth {} in {}ms (target: depth 6 in 15ms)",
-                result.depth, result.elapsed_ms
+            assert!(
+                result.elapsed_ms <= 15 && result.depth >= 6,
+                "Target not met: depth {} in {}ms (target: depth 6 in 15ms)",
+                result.depth,
+                result.elapsed_ms
             );
 
             black_box(result)

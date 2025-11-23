@@ -771,7 +771,7 @@ pub fn order_moves(moves: u64, tt_best_move: Option<u8>) -> Vec<u8> {
 ///
 /// let evaluator = Evaluator::new("patterns.csv").unwrap();
 /// let mut board = BitBoard::new();
-/// let mut tt = TranspositionTable::new(128).unwrap();
+/// let mut tt = TranspositionTable::new(256).unwrap();
 /// let zobrist = ZobristTable::new();
 /// let mut stats = SearchStats::new();
 /// let mut ctx = SearchContext { evaluator: &evaluator, tt: &mut tt, zobrist: &zobrist, stats: &mut stats };
@@ -1003,7 +1003,7 @@ pub fn alpha_beta(
 ///
 /// let evaluator = Evaluator::new("patterns.csv").unwrap();
 /// let mut board = BitBoard::new();
-/// let mut tt = TranspositionTable::new(128).unwrap();
+/// let mut tt = TranspositionTable::new(256).unwrap();
 /// let zobrist = ZobristTable::new();
 /// let mut stats = SearchStats::new();
 /// let mut ctx = SearchContext { evaluator: &evaluator, tt: &mut tt, zobrist: &zobrist, stats: &mut stats };
@@ -1187,7 +1187,7 @@ pub fn complete_search(
 ///
 /// let evaluator = Evaluator::new("patterns.csv").unwrap();
 /// let mut board = BitBoard::new();
-/// let mut tt = TranspositionTable::new(128).unwrap();
+/// let mut tt = TranspositionTable::new(256).unwrap();
 /// let zobrist = ZobristTable::new();
 /// let mut stats = SearchStats::new();
 /// let mut ctx = SearchContext { evaluator: &evaluator, tt: &mut tt, zobrist: &zobrist, stats: &mut stats };
@@ -1290,7 +1290,7 @@ pub fn mtdf(
 ///
 /// let evaluator = Evaluator::new("patterns.csv").unwrap();
 /// let mut board = BitBoard::new();
-/// let mut tt = TranspositionTable::new(128).unwrap();
+/// let mut tt = TranspositionTable::new(256).unwrap();
 /// let zobrist = ZobristTable::new();
 ///
 /// let result = iterative_deepening(&mut board, 15, None, &evaluator, &mut tt, &zobrist);
@@ -1412,7 +1412,7 @@ impl Search {
     /// use prismind::search::Search;
     ///
     /// let evaluator = Evaluator::new("data/patterns.csv").unwrap();
-    /// let search = Search::new(evaluator, 128).unwrap();
+    /// let search = Search::new(evaluator, 256).unwrap();
     /// ```
     pub fn new(evaluator: Evaluator, tt_size_mb: usize) -> Result<Self, SearchError> {
         // 置換表サイズの検証
@@ -1462,7 +1462,7 @@ impl Search {
     /// use prismind::search::Search;
     ///
     /// let evaluator = Evaluator::new("data/patterns.csv").unwrap();
-    /// let mut search = Search::new(evaluator, 128).unwrap();
+    /// let mut search = Search::new(evaluator, 256).unwrap();
     /// let board = BitBoard::new();
     ///
     /// // 時間制限のみで探索（最大深さは自動）
@@ -1576,8 +1576,8 @@ mod tests {
     #[test]
     fn test_transposition_table_new() {
         // 置換表の初期化テスト
-        let tt = TranspositionTable::new(128);
-        assert!(tt.is_ok(), "128MBの置換表は初期化できるべき");
+        let tt = TranspositionTable::new(256);
+        assert!(tt.is_ok(), "256MBの置換表は初期化できるべき");
 
         let tt = tt.unwrap();
         assert!(tt.size > 0, "置換表サイズは0より大きいべき");
@@ -1597,7 +1597,7 @@ mod tests {
     #[test]
     fn test_transposition_table_probe_miss() {
         // 置換表のミステスト
-        let tt = TranspositionTable::new(128).unwrap();
+        let tt = TranspositionTable::new(256).unwrap();
         let hash = 0x123456789ABCDEF0;
 
         let result = tt.probe(hash);
@@ -1607,7 +1607,7 @@ mod tests {
     #[test]
     fn test_transposition_table_store_and_probe() {
         // 同一局面で既存エントリを取得するテスト
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let board = BitBoard::new();
         let hash = zobrist.hash(&board);
@@ -1629,7 +1629,7 @@ mod tests {
     #[test]
     fn test_transposition_table_replacement_strategy() {
         // 置換戦略（深さ優先 + 世代管理）のテスト
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let hash = 0x123456789ABCDEF0;
 
         // 浅い探索結果を保存
@@ -1648,7 +1648,7 @@ mod tests {
     #[test]
     fn test_transposition_table_age_management() {
         // 世代管理のテスト
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let hash = 0x123456789ABCDEF0;
 
         let entry1 = TTEntry::new(hash, 6, Bound::Exact, 100, 19, 0);
@@ -1947,7 +1947,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
         let mut ctx = SearchContext {
@@ -1982,7 +1982,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
         let mut ctx = SearchContext {
@@ -2016,7 +2016,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
         let mut ctx = SearchContext {
@@ -2054,7 +2054,7 @@ mod tests {
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let board = BitBoard::new();
         let mut board_ab = board;
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
 
         let mut nodes_negamax = 0u64;
@@ -2095,7 +2095,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
 
         // 最初の探索
@@ -2152,7 +2152,7 @@ mod tests {
 
         // AlphaBetaでの探索ノード数
         let mut board_ab = board;
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let mut stats = SearchStats::new();
         let mut ctx = SearchContext {
             evaluator: &evaluator,
@@ -2189,7 +2189,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
 
         let hash = zobrist.hash(&board);
@@ -2383,7 +2383,7 @@ mod tests {
 
         // ムーブオーダリングなし（現在の実装）
         let mut board1 = board;
-        let mut tt1 = TranspositionTable::new(128).unwrap();
+        let mut tt1 = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats1 = SearchStats::new();
         let mut ctx1 = SearchContext {
@@ -2397,7 +2397,7 @@ mod tests {
         // ムーブオーダリングあり（新実装）
         // 注: 実装後は同じalpha_beta関数がorder_movesを内部で呼び出す
         let mut board2 = board;
-        let mut tt2 = TranspositionTable::new(128).unwrap();
+        let mut tt2 = TranspositionTable::new(256).unwrap();
         let mut stats2 = SearchStats::new();
         let mut ctx2 = SearchContext {
             evaluator: &evaluator,
@@ -2436,7 +2436,7 @@ mod tests {
         // ベンチマーク的に使用される。
 
         let mut board_test = board;
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let mut stats = SearchStats::new();
         let mut ctx = SearchContext {
             evaluator: &evaluator,
@@ -2468,7 +2468,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
 
         // 最初の探索で置換表にエントリを保存
@@ -2512,7 +2512,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
         let mut ctx = SearchContext {
@@ -2548,7 +2548,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
         let mut ctx = SearchContext {
@@ -2592,7 +2592,7 @@ mod tests {
 
         // AlphaBeta探索
         let mut board_ab = board;
-        let mut tt_ab = TranspositionTable::new(128).unwrap();
+        let mut tt_ab = TranspositionTable::new(256).unwrap();
         let mut stats_ab = SearchStats::new();
         let mut ctx_ab = SearchContext {
             evaluator: &evaluator,
@@ -2604,7 +2604,7 @@ mod tests {
 
         // MTD(f)探索
         let mut board_mtdf = board;
-        let mut tt_mtdf = TranspositionTable::new(128).unwrap();
+        let mut tt_mtdf = TranspositionTable::new(256).unwrap();
         let mut stats_mtdf = SearchStats::new();
         let mut ctx_mtdf = SearchContext {
             evaluator: &evaluator,
@@ -2645,7 +2645,7 @@ mod tests {
 
         // AlphaBeta探索のノード数
         let mut board_ab = board;
-        let mut tt_ab = TranspositionTable::new(128).unwrap();
+        let mut tt_ab = TranspositionTable::new(256).unwrap();
         let mut stats_ab = SearchStats::new();
         let mut ctx_ab = SearchContext {
             evaluator: &evaluator,
@@ -2657,7 +2657,7 @@ mod tests {
 
         // MTD(f)探索のノード数（良い初期推測値を使用）
         let mut board_mtdf = board;
-        let mut tt_mtdf = TranspositionTable::new(128).unwrap();
+        let mut tt_mtdf = TranspositionTable::new(256).unwrap();
         let mut stats_mtdf = SearchStats::new();
         let mut ctx_mtdf = SearchContext {
             evaluator: &evaluator,
@@ -2698,7 +2698,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
 
         // 良い初期推測値（評価関数の結果）
@@ -2740,7 +2740,7 @@ mod tests {
         let bad_guess = 5000;
 
         let mut board_bad = board;
-        let mut tt_bad = TranspositionTable::new(128).unwrap();
+        let mut tt_bad = TranspositionTable::new(256).unwrap();
         let mut stats_bad = SearchStats::new();
         let mut ctx_bad = SearchContext {
             evaluator: &evaluator,
@@ -2756,7 +2756,7 @@ mod tests {
         let good_guess = evaluator.evaluate(&board) as i32;
 
         let mut board_good = board;
-        let mut tt_good = TranspositionTable::new(128).unwrap();
+        let mut tt_good = TranspositionTable::new(256).unwrap();
         let mut stats_good = SearchStats::new();
         let mut ctx_good = SearchContext {
             evaluator: &evaluator,
@@ -2791,7 +2791,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let time_limit_ms = 1000; // 1秒（十分な時間）
 
@@ -2825,7 +2825,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let time_limit_ms = 500;
 
@@ -2858,7 +2858,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let time_limit_ms = 500;
 
@@ -2887,7 +2887,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let time_limit_ms = 200; // より現実的な時間制限
 
@@ -2932,7 +2932,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let time_limit_ms = 100; // より現実的な時間制限
 
@@ -2972,7 +2972,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let time_limit_ms = 100;
 
@@ -3010,7 +3010,7 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         let mut board = BitBoard::new();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let time_limit_ms = 200;
 
@@ -3057,7 +3057,7 @@ mod tests {
 
         for _ in 0..num_tests {
             let mut board = BitBoard::new();
-            let mut tt = TranspositionTable::new(128).unwrap();
+            let mut tt = TranspositionTable::new(256).unwrap();
 
             let result = iterative_deepening(
                 &mut board,
@@ -3121,7 +3121,7 @@ mod tests {
     fn test_complete_search_detects_endgame() {
         // 完全読みが空きマス数14以下を検出することをテスト
         let evaluator = Evaluator::new("patterns.csv").unwrap();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
 
@@ -3159,7 +3159,7 @@ mod tests {
     fn test_complete_search_terminates() {
         // 完全読みが終局判定を正しく行うことをテスト
         let evaluator = Evaluator::new("patterns.csv").unwrap();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
 
@@ -3188,7 +3188,7 @@ mod tests {
     fn test_complete_search_uses_transposition_table() {
         // 完全読みが置換表を活用することをテスト
         let evaluator = Evaluator::new("patterns.csv").unwrap();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
 
@@ -3237,7 +3237,7 @@ mod tests {
     fn test_complete_search_performance() {
         // 完全読みが100ms以内に完了することを目標とするテスト
         let evaluator = Evaluator::new("patterns.csv").unwrap();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
 
@@ -3275,7 +3275,7 @@ mod tests {
     fn test_complete_search_move_ordering() {
         // 完全読みが通常探索と同じムーブオーダリングを使用することをテスト
         let evaluator = Evaluator::new("patterns.csv").unwrap();
-        let mut tt = TranspositionTable::new(128).unwrap();
+        let mut tt = TranspositionTable::new(256).unwrap();
         let zobrist = ZobristTable::new();
         let mut stats = SearchStats::new();
 
@@ -3313,13 +3313,13 @@ mod tests {
 
     #[test]
     fn test_search_new_valid_size() {
-        // 有効なサイズ（128MB）でSearch構造体を初期化できることを確認
+        // 有効なサイズ（256MB）でSearch構造体を初期化できることを確認
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
 
-        let search_result = Search::new(evaluator, 128);
+        let search_result = Search::new(evaluator, 256);
         assert!(
             search_result.is_ok(),
-            "Search initialization should succeed with 128MB"
+            "Search initialization should succeed with 256MB"
         );
     }
 
@@ -3382,7 +3382,7 @@ mod tests {
         // 初期盤面での探索が成功することを確認
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
 
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         let board = BitBoard::new();
         let result = search.search(&board, 15, None);
@@ -3411,7 +3411,7 @@ mod tests {
         // 探索開始時に置換表の世代が更新されることを確認
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
 
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         let board = BitBoard::new();
 
@@ -3429,7 +3429,7 @@ mod tests {
         // 空きマス数14以下で完全読みモードに切り替わることを確認
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
 
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         // 終盤局面を構築（move_count >= 46）
         let mut board = BitBoard::new();
@@ -3468,7 +3468,7 @@ mod tests {
         // 探索統計が正しく収集されることを確認
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
 
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         let board = BitBoard::new();
         let result = search
@@ -3510,7 +3510,7 @@ mod tests {
     #[test]
     fn test_transposition_table_cache_alignment() {
         // 置換表のエントリ配列がキャッシュラインにアライメントされていることを検証
-        let tt = TranspositionTable::new(128).expect("Failed to create transposition table");
+        let tt = TranspositionTable::new(256).expect("Failed to create transposition table");
 
         // 置換表が正常に動作することを確認（アライメント変更後も機能するか）
         let zobrist = ZobristTable::new();
@@ -3540,7 +3540,7 @@ mod tests {
         // ARM64環境でのキャッシュラインアライメント検証
         use std::mem;
 
-        let _tt = TranspositionTable::new(128).expect("Failed to create transposition table");
+        let _tt = TranspositionTable::new(256).expect("Failed to create transposition table");
 
         // TTEntryのアライメントがARM64のキャッシュライン（64バイト）に一致することを確認
         assert_eq!(
@@ -3556,7 +3556,7 @@ mod tests {
         // x86_64環境でもアライメント最適化が動作することを確認
         use std::mem;
 
-        let _tt = TranspositionTable::new(128).expect("Failed to create transposition table");
+        let _tt = TranspositionTable::new(256).expect("Failed to create transposition table");
 
         // x86_64でも64バイトアライメントが適用されることを確認
         assert_eq!(
@@ -3797,7 +3797,7 @@ mod tests {
         use std::time::Instant;
 
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         // 100手の探索時間を測定
         let num_searches = 100;
@@ -3839,7 +3839,7 @@ mod tests {
         use std::time::Instant;
 
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         let board = BitBoard::new();
 
@@ -3872,7 +3872,7 @@ mod tests {
     fn test_perf_mtdf_node_reduction_70_80_percent() {
         // Requirement 15.3: MTD(f)探索がAlphaBetaより20-30%少ないノード数
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         let board = BitBoard::new();
 
@@ -3898,7 +3898,7 @@ mod tests {
     fn test_perf_tt_hit_rate_50_percent_midgame() {
         // Requirement 15.4: 置換表ヒット率50%以上（中盤以降）
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         // 中盤局面を作成（手数20程度）
         let mut board = BitBoard::new();
@@ -3939,7 +3939,7 @@ mod tests {
         use std::time::Instant;
 
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         // 残り14手の局面を作成（move_count = 46）
         let mut board = BitBoard::new();
@@ -3981,7 +3981,7 @@ mod tests {
     fn test_perf_move_ordering_20_30_percent_improvement() {
         // Requirement 15.6: ムーブオーダリングが枝刈り効率を20-30%向上
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         let board = BitBoard::new();
 
@@ -4008,14 +4008,14 @@ mod tests {
 
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
 
-        // 置換表128MBで初期化（デフォルトサイズ）
-        let _search = Search::new(evaluator, 128).expect("Failed to create Search");
+        // 置換表256MBで初期化（デフォルトサイズ）
+        let _search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         // メモリ使用量の推定
-        // 置換表: 128MB
+        // 置換表: 256MB
         // 評価テーブル: 70MB (Phase 1)
         // その他の構造体: 数MB
-        let tt_size_mb = 128;
+        let tt_size_mb = 256;
         let eval_table_size_mb = 70; // Phase 1の評価テーブル
         let other_size_mb = 10; // その他のオーバーヘッド
 
@@ -4050,7 +4050,7 @@ mod tests {
         use std::time::Instant;
 
         let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
-        let mut search = Search::new(evaluator, 128).expect("Failed to create Search");
+        let mut search = Search::new(evaluator, 256).expect("Failed to create Search");
 
         let num_searches = 100;
         let mut total_time = 0u64;
