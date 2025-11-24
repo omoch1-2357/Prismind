@@ -377,6 +377,8 @@ pub struct UndoInfo {
     pub turn: Color,
     /// 着手前の手数
     pub move_count: u8,
+    pub pos: u8,
+    pub flipped: u64,
 }
 
 /// ゲームの状態を表す列挙型
@@ -545,11 +547,13 @@ pub fn make_move(board: &mut BitBoard, pos: u8) -> Result<UndoInfo, GameError> {
     }
 
     // Undo情報を保存
-    let undo = UndoInfo {
+    let mut undo = UndoInfo {
         black: board.black,
         white_mask: board.white_mask(),
         turn: board.turn(),
         move_count: board.move_count(),
+        pos,
+        flipped: 0,
     };
 
     // 8方向で反転される石を検出
@@ -557,6 +561,8 @@ pub fn make_move(board: &mut BitBoard, pos: u8) -> Result<UndoInfo, GameError> {
     for &dir in &DIRECTIONS {
         all_flipped |= find_flipped_in_direction(board, pos, dir);
     }
+
+    undo.flipped = all_flipped;
 
     // メタデータを事前に保存
     let old_metadata = board.white & (TURN_MASK | MOVE_COUNT_MASK);
@@ -1882,6 +1888,8 @@ mod tests {
             white_mask: original.white_mask(),
             turn: original.turn(),
             move_count: original.move_count(),
+            pos: 19,
+            flipped: 0,
         };
         undo_move(&mut board, undo_info);
         assert_eq!(board, original, "undo_move should restore original state");

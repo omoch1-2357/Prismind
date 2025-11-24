@@ -186,6 +186,50 @@ impl ZobristTable {
         Self { black, white, turn }
     }
 
+    /// 着手によるハッシュ差分を計算
+    ///
+    /// # Arguments
+    /// * `hash` - 現在のハッシュ
+    /// * `pos` - 着手位置
+    /// * `flipped` - 反転した石のマスク
+    /// * `is_black` - 黒番の着手かどうか
+    ///
+    /// # Returns
+    /// 更新後のハッシュ
+    #[inline]
+    pub fn update_hash(&self, hash: u64, pos: u8, flipped: u64, is_black: bool) -> u64 {
+        let mut h = hash;
+
+        // 手番切り替え
+        h ^= self.turn;
+
+        if is_black {
+            // 黒が着手：黒石を追加
+            h ^= self.black[pos as usize];
+            // 反転：白→黒
+            let mut bits = flipped;
+            while bits != 0 {
+                let p = bits.trailing_zeros() as usize;
+                h ^= self.white[p]; // 白を消す
+                h ^= self.black[p]; // 黒を追加
+                bits &= bits - 1;
+            }
+        } else {
+            // 白が着手：白石を追加
+            h ^= self.white[pos as usize];
+            // 反転：黒→白
+            let mut bits = flipped;
+            while bits != 0 {
+                let p = bits.trailing_zeros() as usize;
+                h ^= self.black[p]; // 黒を消す
+                h ^= self.white[p]; // 白を追加
+                bits &= bits - 1;
+            }
+        }
+
+        h
+    }
+
     /// BitBoardからハッシュ計算
     ///
     /// # Arguments
@@ -488,47 +532,6 @@ pub fn negamax(
     (best_score, best_move)
 }
 
-/// 角の位置か判定
-///
-/// # Arguments
-/// * `pos` - 盤面の位置（0-63）
-///
-/// # Returns
-/// 角の位置（0, 7, 56, 63）ならtrue
-#[inline]
-fn is_corner(pos: u8) -> bool {
-    matches!(pos, 0 | 7 | 56 | 63)
-}
-
-/// X打ち（角の隣）か判定
-///
-/// # Arguments
-/// * `pos` - 盤面の位置（0-63）
-///
-/// # Returns
-/// X打ち位置（1, 8, 9, 6, 14, 15, 48, 49, 54, 55, 57, 62）ならtrue
-#[inline]
-fn is_x_square(pos: u8) -> bool {
-    matches!(pos, 1 | 8 | 9 | 6 | 14 | 15 | 48 | 49 | 54 | 55 | 57 | 62)
-}
-
-/// 辺の位置か判定
-///
-/// # Arguments
-/// * `pos` - 盤面の位置（0-63）
-///
-/// # Returns
-/// 辺の位置（角を除く）ならtrue
-#[inline]
-fn is_edge(pos: u8) -> bool {
-    if is_corner(pos) {
-        return false;
-    }
-    let row = pos / 8;
-    let col = pos % 8;
-    row == 0 || row == 7 || col == 0 || col == 7
-}
-
 /// ブランチレス版: 角の位置か判定（ビット演算のみ）
 ///
 /// # Arguments
@@ -622,42 +625,45 @@ fn is_edge_branchless(pos: u8) -> bool {
 /// # Requirements
 /// * 16.3: ブランチレス実装で分岐予測ミスを最小化
 /// * 16.4: ARM64とx86_64での性能比較
-pub fn order_moves_branchless(moves: u64, tt_best_move: Option<u8>) -> Vec<u8> {
-    if moves == 0 {
-        return Vec::new();
-    }
+pub fn order_moves_branchless(moves: u64, tt_best_move: Option<u8>) -> ([u8; 32], usize) {
+    let mut move_list = [0u8; 32];
+    let mut count = 0;
 
-    // 合法手をVecに変換
-    let mut move_list = Vec::new();
     let mut move_bits = moves;
     while move_bits != 0 {
         let pos = move_bits.trailing_zeros() as u8;
-        move_list.push(pos);
+        move_list[count] = pos;
+        count += 1;
         move_bits &= move_bits - 1;
     }
 
     // ブランチレス優先度付け関数
     let priority = |pos: u8| -> i32 {
-        // TT最善手の判定（ブランチレス）
         let tt_bonus = if let Some(tt_move) = tt_best_move {
             ((pos == tt_move) as i32) * 1000
         } else {
             0
         };
-
-        // 各種位置判定（ビット演算のみ）
         let corner_bonus = (is_corner_branchless(pos) as i32) * 100;
         let x_penalty = (is_x_square_branchless(pos) as i32) * (-60);
         let edge_bonus = (is_edge_branchless(pos) as i32) * 50;
         let base_score = 10;
-
         tt_bonus + corner_bonus + x_penalty + edge_bonus + base_score
     };
 
-    // 優先順位でソート（降順）
-    move_list.sort_by_key(|b| std::cmp::Reverse(priority(*b)));
+    // 挿入ソート（小規模配列に効率的）
+    for i in 1..count {
+        let key = move_list[i];
+        let key_priority = priority(key);
+        let mut j = i;
+        while j > 0 && priority(move_list[j - 1]) < key_priority {
+            move_list[j] = move_list[j - 1];
+            j -= 1;
+        }
+        move_list[j] = key;
+    }
 
-    move_list
+    (move_list, count)
 }
 
 /// 合法手を優先順位付けしてソート
@@ -682,54 +688,34 @@ pub fn order_moves_branchless(moves: u64, tt_best_move: Option<u8>) -> Vec<u8> {
 /// # Postconditions
 /// * 返却リストは合法手のみ含む
 /// * 置換表最善手が先頭（存在する場合）
-pub fn order_moves(moves: u64, tt_best_move: Option<u8>) -> Vec<u8> {
-    // 合法手がない場合は空のVecを返す
-    if moves == 0 {
-        return Vec::new();
+pub fn order_moves(moves: u64, tt_best_move: Option<u8>) -> ([u8; 32], usize) {
+    let mut move_list = [0u8; 32];
+    let mut count = 0;
+
+    // TT最善手を先頭に
+    if let Some(tt_move) = tt_best_move
+        && moves & (1u64 << tt_move) != 0
+    {
+        move_list[count] = tt_move;
+        count += 1;
     }
 
-    // 合法手をVecに変換
-    let mut move_list = Vec::new();
+    // 残りの手を追加
     let mut move_bits = moves;
     while move_bits != 0 {
         let pos = move_bits.trailing_zeros() as u8;
-        move_list.push(pos);
-        move_bits &= move_bits - 1; // 最下位ビットをクリア
+        move_bits &= move_bits - 1;
+
+        // TT最善手は既に追加済みなのでスキップ
+        if Some(pos) == tt_best_move {
+            continue;
+        }
+
+        move_list[count] = pos;
+        count += 1;
     }
 
-    // 優先順位付け関数
-    let priority = |pos: u8| -> i32 {
-        // TT最善手が最優先
-        if let Some(tt_move) = tt_best_move
-            && pos == tt_move
-        {
-            return 1000; // 最高優先度
-        }
-
-        // 角: 優先度100
-        if is_corner(pos) {
-            return 100;
-        }
-
-        // X打ち: 優先度-50（低優先度）
-        // 注: X打ちは辺と重なる場合があるため、辺より先にチェック
-        if is_x_square(pos) {
-            return -50;
-        }
-
-        // 辺: 優先度50
-        if is_edge(pos) {
-            return 50;
-        }
-
-        // 内側: 優先度10
-        10
-    };
-
-    // 優先順位でソート（降順）
-    move_list.sort_by_key(|b| std::cmp::Reverse(priority(*b)));
-
-    move_list
+    (move_list, count)
 }
 
 /// Alpha-Beta枝刈り探索
@@ -903,14 +889,15 @@ pub fn alpha_beta(
     };
 
     // ムーブオーダリング: 合法手を優先順位付けしてソート
-    let ordered_moves = order_moves(moves, tt_best_move);
+    let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
 
     // 最善評価値と最善手を初期化
     let mut best_score = f32::NEG_INFINITY;
     let mut best_move = None;
 
     // 優先順位付けされた合法手について再帰的に探索
-    for pos in ordered_moves {
+    for pos in ordered_moves.iter().take(move_count) {
+        let pos = *pos;
         // 着手を実行
         if let Ok(undo_info) = make_move(board, pos) {
             // 再帰的に探索（符号反転でNegamaxの原則を適用）
@@ -1015,6 +1002,7 @@ pub fn complete_search(
     board: &mut BitBoard,
     mut alpha: i32,
     beta: i32,
+    hash: u64,
     ctx: &mut SearchContext,
 ) -> (f32, Option<u8>) {
     // ノード数をカウント
@@ -1030,7 +1018,8 @@ pub fn complete_search(
         GameState::Pass => {
             // パス: 盤面を反転して探索継続
             *board = board.flip();
-            let (score, _) = complete_search(board, -beta, -alpha, ctx);
+            let new_hash = hash ^ ctx.zobrist.turn;
+            let (score, _) = complete_search(board, -beta, -alpha, new_hash, ctx);
             *board = board.flip();
             return (-score, None);
         }
@@ -1039,31 +1028,29 @@ pub fn complete_search(
         }
     }
 
-    // 置換表をプローブ
-    let hash = ctx.zobrist.hash(board);
     if let Some(entry) = ctx.tt.probe(hash) {
         ctx.stats.tt_hits += 1;
 
-        // 深さが十分なら置換表の評価値を使用
-        let remaining_moves = 60 - board.move_count();
-        if entry.depth >= remaining_moves as i8 {
-            let tt_score = entry.score as f32;
+        let tt_score = entry.score as f32;
 
-            match entry.bound {
-                Bound::Exact => {
-                    // 正確な評価値
+        match entry.bound {
+            Bound::Exact => {
+                // 正確な評価値
+                return (tt_score, Some(entry.best_move));
+            }
+            Bound::Lower => {
+                if tt_score >= beta as f32 {
                     return (tt_score, Some(entry.best_move));
                 }
-                Bound::Lower => {
-                    // 下限
+                // alphaの改善（深さチェック付き）
+                let remaining_moves = 60 - board.move_count();
+                if entry.depth >= remaining_moves as i8 {
                     alpha = alpha.max(entry.score as i32);
                 }
-                Bound::Upper => {
-                    // 上限
-                    let beta_i32 = beta.min(entry.score as i32);
-                    if alpha >= beta_i32 {
-                        return (tt_score, Some(entry.best_move));
-                    }
+            }
+            Bound::Upper => {
+                if tt_score <= alpha as f32 {
+                    return (tt_score, None);
                 }
             }
         }
@@ -1072,25 +1059,32 @@ pub fn complete_search(
     // 合法手を取得
     let moves = legal_moves(board);
     if moves == 0 {
-        // パスの場合（上記のGameState::Passで処理されるはずだが念のため）
         *board = board.flip();
-        let (score, _) = complete_search(board, -beta, -alpha, ctx);
+        let new_hash = hash ^ ctx.zobrist.turn;
+        let (score, _) = complete_search(board, -beta, -alpha, new_hash, ctx);
         *board = board.flip();
         return (-score, None);
     }
 
     // ムーブオーダリング: 置換表の最善手を優先
     let tt_best_move = ctx.tt.probe(hash).map(|e| e.best_move);
-    let ordered_moves = order_moves(moves, tt_best_move);
+    let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
 
     let mut best_score = alpha as f32;
     let mut best_move = None;
 
     // 全合法手を探索
-    for mv in ordered_moves {
+    for mv in ordered_moves.iter().take(move_count) {
+        let mv = *mv;
         let undo = make_move(board, mv).unwrap();
 
-        let (score, _) = complete_search(board, -beta, -(alpha.max(best_score as i32)), ctx);
+        let is_black = undo.turn == crate::board::Color::Black;
+        let new_hash = ctx
+            .zobrist
+            .update_hash(hash, undo.pos, undo.flipped, is_black);
+
+        let (score, _) =
+            complete_search(board, -beta, -(alpha.max(best_score as i32)), new_hash, ctx);
         let score = -score;
 
         undo_move(board, undo);
@@ -1498,6 +1492,18 @@ impl Search {
 
         // 空きマス数14以下で完全読みモードに切り替え
         if empty_count <= 14 {
+            {
+                let mut prep_stats = SearchStats::new();
+                let mut prep_ctx = SearchContext {
+                    evaluator: &self.evaluator,
+                    tt: &mut self.transposition_table,
+                    zobrist: &self.zobrist,
+                    stats: &mut prep_stats,
+                };
+                // 深さ6の探索でmove orderingを改善
+                alpha_beta(&mut board_copy, 6, -10000, 10000, &mut prep_ctx);
+            }
+
             // 完全読みモード
             let start_time = std::time::Instant::now();
             let mut stats = SearchStats::new();
@@ -1509,7 +1515,9 @@ impl Search {
                 stats: &mut stats,
             };
 
-            let (score, best_move) = complete_search(&mut board_copy, -10000, 10000, &mut ctx);
+            let hash = self.zobrist.hash(&board_copy);
+            let (score, best_move) =
+                complete_search(&mut board_copy, -10000, 10000, hash, &mut ctx);
 
             let elapsed_ms = start_time.elapsed().as_millis() as u64;
 
@@ -2228,16 +2236,16 @@ mod tests {
         let moves = (1u64 << 0) | (1u64 << 7) | (1u64 << 19) | (1u64 << 56);
         let tt_best_move = None;
 
-        let ordered = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
 
         // 角のマス（0, 7, 56）が上位に来ることを確認
-        assert!(ordered.len() == 4, "Should have 4 moves");
+        assert!(move_count == 4, "Should have 4 moves");
 
-        let first_three = &ordered[0..3];
+        let first_three = &ordered_moves[0..3];
         assert!(
             first_three.contains(&0) && first_three.contains(&7) && first_three.contains(&56),
             "Corners should be in top 3 positions, got {:?}",
-            ordered
+            ordered_moves
         );
     }
 
@@ -2250,16 +2258,16 @@ mod tests {
         let moves = (1u64 << 1) | (1u64 << 9) | (1u64 << 20) | (1u64 << 30);
         let tt_best_move = None;
 
-        let ordered = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
 
-        assert!(ordered.len() == 4, "Should have 4 moves");
+        assert!(move_count == 4, "Should have 4 moves");
 
         // X打ちは最後の方に来るべき
-        let last_two = &ordered[2..4];
+        let last_two = &ordered_moves[2..4];
         assert!(
             last_two.contains(&1) && last_two.contains(&9),
             "X-squares should be in last positions, got {:?}",
-            ordered
+            ordered_moves
         );
     }
 
@@ -2272,17 +2280,17 @@ mod tests {
         let moves = (1u64 << 2) | (1u64 << 3) | (1u64 << 20) | (1u64 << 58);
         let tt_best_move = None;
 
-        let ordered = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
 
-        assert!(ordered.len() == 4, "Should have 4 moves");
+        assert!(move_count == 4, "Should have 4 moves");
 
         // 辺のマスが上位に来ることを確認（角ほどではないが内側より高い）
-        let first_two = &ordered[0..2];
+        let first_two = &ordered_moves[0..2];
         // 辺は内側より優先されるべき
         assert!(
             first_two.contains(&2) || first_two.contains(&3) || first_two.contains(&58),
             "Edges should have higher priority than center, got {:?}",
-            ordered
+            ordered_moves
         );
     }
 
@@ -2293,13 +2301,13 @@ mod tests {
         let moves = (1u64 << 19) | (1u64 << 20) | (1u64 << 27) | (1u64 << 28);
         let tt_best_move = Some(27);
 
-        let ordered = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
 
-        assert!(ordered.len() == 4, "Should have 4 moves");
+        assert!(move_count == 4, "Should have 4 moves");
         assert_eq!(
-            ordered[0], 27,
+            ordered_moves[0], 27,
             "TT best move should be first, got {:?}",
-            ordered
+            ordered_moves
         );
     }
 
@@ -2310,18 +2318,18 @@ mod tests {
         let moves = (1u64 << 0) | (1u64 << 1) | (1u64 << 19) | (1u64 << 20);
         let tt_best_move = None;
 
-        let ordered = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
 
         // Vec<u8>型で返されることを確認
-        assert!(ordered.len() == 4, "Should return 4 moves");
+        assert!(move_count == 4, "Should return 4 moves");
 
         // 全て0-63の範囲
-        for &pos in &ordered {
+        for &pos in &ordered_moves {
             assert!(pos < 64, "Move position should be 0-63, got {}", pos);
         }
 
         // 全て合法手に含まれる
-        for &pos in &ordered {
+        for &pos in &ordered_moves {
             assert_ne!(
                 moves & (1u64 << pos),
                 0,
@@ -2337,9 +2345,12 @@ mod tests {
         let moves = 0u64;
         let tt_best_move = None;
 
-        let ordered = order_moves(moves, tt_best_move);
+        let (ordered_moves, _) = order_moves(moves, tt_best_move);
 
-        assert!(ordered.is_empty(), "Empty moves should return empty Vec");
+        assert!(
+            ordered_moves.is_empty(),
+            "Empty moves should return empty Vec"
+        );
     }
 
     #[test]
@@ -2353,18 +2364,18 @@ mod tests {
         let moves = (1u64 << 0) | (1u64 << 1) | (1u64 << 3) | (1u64 << 20) | (1u64 << 27);
         let tt_best_move = Some(27);
 
-        let ordered = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
 
-        assert!(ordered.len() == 5, "Should have 5 moves");
+        assert!(move_count == 5, "Should have 5 moves");
 
         // 優先順位: TT最善手(27) > 角(0) > 辺(3) > 内側(20) > X打ち(1)
-        assert_eq!(ordered[0], 27, "TT move should be first");
-        assert_eq!(ordered[1], 0, "Corner should be second");
+        assert_eq!(ordered_moves[0], 27, "TT move should be first");
+        assert_eq!(ordered_moves[1], 0, "Corner should be second");
         // 残りの順序も確認
         assert!(
-            ordered[4] == 1,
+            ordered_moves[4] == 1,
             "X-square should be last, got {:?}",
-            ordered
+            ordered_moves
         );
     }
 
@@ -3145,7 +3156,8 @@ mod tests {
         };
 
         // complete_searchを呼び出し
-        let (score, _best_move) = complete_search(&mut board, -10000, 10000, &mut ctx);
+        let hash = ctx.zobrist.hash(&board);
+        let (score, _best_move) = complete_search(&mut board, -10000, 10000, hash, &mut ctx);
 
         // 評価値が最終石差×100の範囲内であることを確認
         assert!(
@@ -3174,7 +3186,8 @@ mod tests {
         };
 
         // complete_searchを呼び出し
-        let (score, _best_move) = complete_search(&mut board, -10000, 10000, &mut ctx);
+        let hash = ctx.zobrist.hash(&board);
+        let (score, _best_move) = complete_search(&mut board, -10000, 10000, hash, &mut ctx);
 
         // 最終スコアが返されることを確認
         assert!(
@@ -3208,7 +3221,8 @@ mod tests {
         };
 
         // 1回目の探索
-        let (score1, move1) = complete_search(&mut board, -10000, 10000, &mut ctx);
+        let hash = ctx.zobrist.hash(&board);
+        let (score1, move1) = complete_search(&mut board, -10000, 10000, hash, &mut ctx);
 
         // 統計をリセット
         stats.tt_hits = 0;
@@ -3220,7 +3234,8 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats,
         };
-        let (score2, move2) = complete_search(&mut board, -10000, 10000, &mut ctx);
+        let hash = ctx.zobrist.hash(&board);
+        let (score2, move2) = complete_search(&mut board, -10000, 10000, hash, &mut ctx);
 
         // 同じ結果を返すことを確認
         assert_eq!(score1, score2, "Scores should match");
@@ -3257,7 +3272,8 @@ mod tests {
         };
 
         let start = std::time::Instant::now();
-        let (_score, _best_move) = complete_search(&mut board, -10000, 10000, &mut ctx);
+        let hash = ctx.zobrist.hash(&board);
+        let (_score, _best_move) = complete_search(&mut board, -10000, 10000, hash, &mut ctx);
         let elapsed = start.elapsed().as_millis();
 
         println!("Complete search depth 14 took: {}ms", elapsed);
@@ -3295,7 +3311,8 @@ mod tests {
         };
 
         // complete_searchを実行
-        let (_score, best_move) = complete_search(&mut board, -10000, 10000, &mut ctx);
+        let hash = ctx.zobrist.hash(&board);
+        let (_score, best_move) = complete_search(&mut board, -10000, 10000, hash, &mut ctx);
 
         // 合法手が存在する場合、最善手が返されることを確認
         let moves = legal_moves(&board);
@@ -3656,34 +3673,6 @@ mod tests {
     }
 
     #[test]
-    fn test_branchless_functions_match_original() {
-        // ブランチレス版がオリジナル版と同じ結果を返すことを確認
-
-        for pos in 0..64 {
-            assert_eq!(
-                is_corner_branchless(pos),
-                is_corner(pos),
-                "is_corner mismatch at position {}",
-                pos
-            );
-
-            assert_eq!(
-                is_x_square_branchless(pos),
-                is_x_square(pos),
-                "is_x_square mismatch at position {}",
-                pos
-            );
-
-            assert_eq!(
-                is_edge_branchless(pos),
-                is_edge(pos),
-                "is_edge mismatch at position {}",
-                pos
-            );
-        }
-    }
-
-    #[test]
     fn test_order_moves_branchless_same_result() {
         // Requirement 16.3: ブランチレス実装が同じ結果を返すことを確認
 
@@ -3708,11 +3697,11 @@ mod tests {
         ];
 
         for (moves, tt_move) in test_cases {
-            let original = order_moves(moves, tt_move);
-            let branchless = order_moves_branchless(moves, tt_move);
+            let (original_moves, _original_count) = order_moves(moves, tt_move);
+            let (branchless_moves, _branchless_count) = order_moves_branchless(moves, tt_move);
 
             assert_eq!(
-                original, branchless,
+                original_moves, branchless_moves,
                 "Branchless ordering should match original for moves={:064b}, tt_move={:?}",
                 moves, tt_move
             );
