@@ -497,8 +497,8 @@ pub fn negamax(
         }
         GameState::Pass => {
             // パス状態の際、盤面を反転して相手番として探索を継続
-            let flipped_board = board.flip();
-            let (score, _) = negamax(&flipped_board, depth, evaluator, _zobrist, nodes);
+            let passed_board = board.pass();
+            let (score, _) = negamax(&passed_board, depth, evaluator, _zobrist, nodes);
             // 符号反転（Negamaxの原則）
             return (-score, None);
         }
@@ -812,10 +812,9 @@ pub fn alpha_beta(
         }
         GameState::Pass => {
             // パス状態の際、盤面を反転して相手番として探索を継続
-            let mut flipped_board = board.flip();
-            let flipped_hash = ctx.zobrist.hash(&flipped_board);
-            let (score, _) =
-                alpha_beta(&mut flipped_board, depth, -beta, -alpha, flipped_hash, ctx);
+            let mut passed_board = board.pass();
+            let passed_hash = hash ^ ctx.zobrist.turn;
+            let (score, _) = alpha_beta(&mut passed_board, depth, -beta, -alpha, passed_hash, ctx);
             // 符号反転（Negamaxの原則）
             let negated_score = -score;
             // 置換表に保存
@@ -1027,14 +1026,14 @@ pub fn complete_search(
     // 合法手を取得
     let moves = legal_moves(board);
     if moves == 0 {
-        let mut flipped_board = board.flip();
-        if legal_moves(&flipped_board) == 0 {
+        let mut passed_board = board.pass();
+        if legal_moves(&passed_board) == 0 {
             let final_score_val = final_score(board);
             return ((final_score_val as f32) * 100.0, None);
         }
 
         let new_hash = hash ^ ctx.zobrist.turn;
-        let (score, _) = complete_search(&mut flipped_board, -beta, -alpha, new_hash, ctx);
+        let (score, _) = complete_search(&mut passed_board, -beta, -alpha, new_hash, ctx);
         return (-score, None);
     }
 
@@ -1739,7 +1738,7 @@ mod tests {
                 }
             } else {
                 // パスの場合は手番を反転
-                board = board.flip();
+                board = board.pass();
             }
         }
 
@@ -3103,13 +3102,13 @@ mod tests {
         while board.move_count() < target_move_count {
             let moves = legal_moves(&board);
             if moves == 0 {
-                // パスの場合、盤面を反転
-                board = board.flip();
-                let moves_after_flip = legal_moves(&board);
-                if moves_after_flip == 0 {
+                // パスの場合、手番のみを交代
+                board = board.pass();
+                if legal_moves(&board) == 0 {
                     // 両者パスならゲーム終了
                     break;
                 }
+                continue;
             } else {
                 // 最初の合法手を打つ
                 let first_move = moves.trailing_zeros() as u8;
@@ -3456,9 +3455,8 @@ mod tests {
             let moves = legal_moves(&board);
             if moves == 0 {
                 // パスの場合は手番を反転（move_countは増やさない）
-                board = board.flip();
-                let moves_after_pass = legal_moves(&board);
-                if moves_after_pass == 0 {
+                board = board.pass();
+                if legal_moves(&board) == 0 {
                     // 両者パス = ゲーム終了
                     break;
                 }

@@ -79,7 +79,7 @@
 //! # メモリ使用量
 //!
 //! - 評価テーブル: 約70-80MB (30ステージ × 14パターン)
-//! - BitBoard: 16バイト (スタック配置)
+//! - BitBoard: 24バイト (石配置16バイト + メタデータ)
 
 // 公開モジュール
 pub mod board;
@@ -112,8 +112,8 @@ mod tests {
 
     #[test]
     fn test_bitboard_size() {
-        // BitBoardは16バイト以内であること
-        assert!(std::mem::size_of::<board::BitBoard>() <= 16);
+        // BitBoardは24バイト以内であること
+        assert!(std::mem::size_of::<board::BitBoard>() <= 24);
     }
 
     #[test]
