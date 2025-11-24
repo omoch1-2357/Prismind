@@ -172,6 +172,44 @@ pub fn coord_to_bit(coord: &str) -> Result<u8, PatternError> {
     Ok(row_idx * 8 + col_idx)
 }
 
+#[inline]
+fn extract_index_with_positions(
+    black: u64,
+    white: u64,
+    positions: &[u8; 10],
+    len: usize,
+    swap_colors: bool,
+) -> usize {
+    let mut index = 0usize;
+    let mut power_of_3 = 1usize;
+
+    // swap_colorsフラグを整数値に変換（ブランチレス）
+    let swap = swap_colors as u8;
+
+    for pos in positions.iter().take(len) {
+        let pos = *pos;
+        let bit = 1u64 << pos;
+
+        // 各セルの石の状態を取得（ブランチレス）
+        let is_black = ((black & bit) >> pos) as u8;
+        let is_white = ((white & bit) >> pos) as u8;
+
+        // 3進数の値を計算（ブランチレス）
+        // swap=false: black=1, white=2
+        // swap=true:  black=2, white=1
+        let black_value = 1 + swap;
+        let white_value = 2 - swap;
+
+        let cell_value = (is_black * black_value + is_white * white_value) as usize;
+
+        // 3進数インデックスに累積
+        index += cell_value * power_of_3;
+        power_of_3 *= 3;
+    }
+
+    index
+}
+
 /// パターンインデックスを3進数で抽出
 ///
 /// 与えられた盤面とパターンから3進数インデックスを計算する。
@@ -203,11 +241,6 @@ pub fn coord_to_bit(coord: &str) -> Result<u8, PatternError> {
 ///
 /// 3進数インデックス（0から3^k-1の範囲）
 ///
-/// # Performance
-///
-/// ブランチレス実装により、分岐予測ミスを最小化。
-/// 全てのセルについて同じ処理パスを通るため、CPUパイプラインの効率が向上。
-///
 /// # Examples
 ///
 /// ```
@@ -223,34 +256,13 @@ pub fn coord_to_bit(coord: &str) -> Result<u8, PatternError> {
 /// ```
 #[inline]
 pub fn extract_index(black: u64, white: u64, pattern: &Pattern, swap_colors: bool) -> usize {
-    let mut index = 0usize;
-    let mut power_of_3 = 1usize;
-
-    // swap_colorsフラグを整数値に変換（ブランチレス）
-    let swap = swap_colors as u8;
-
-    for i in 0..(pattern.k as usize) {
-        let pos = pattern.positions[i];
-        let bit = 1u64 << pos;
-
-        // 各セルの石の状態を取得（ブランチレス）
-        let is_black = ((black & bit) >> pos) as u8;
-        let is_white = ((white & bit) >> pos) as u8;
-
-        // 3進数の値を計算（ブランチレス）
-        // swap=false: black=1, white=2
-        // swap=true:  black=2, white=1
-        let black_value = 1 + swap;
-        let white_value = 2 - swap;
-
-        let cell_value = (is_black * black_value + is_white * white_value) as usize;
-
-        // 3進数インデックスに累積
-        index += cell_value * power_of_3;
-        power_of_3 *= 3;
-    }
-
-    index
+    extract_index_with_positions(
+        black,
+        white,
+        &pattern.positions,
+        pattern.k as usize,
+        swap_colors,
+    )
 }
 
 /// 4方向の回転で全パターンを抽出
@@ -273,6 +285,40 @@ pub fn extract_index(black: u64, white: u64, pattern: &Pattern, swap_colors: boo
 /// 90°回転は主対角線に関する鏡映と中心反転の合成であり、
 /// この変換により黒石と白石の役割が入れ替わる。
 ///
+#[inline]
+fn rotate_pos_cw_90(pos: u8) -> u8 {
+    let row = pos / 8;
+    let col = pos % 8;
+    let new_row = 7 - col;
+    let new_col = row;
+    new_row * 8 + new_col
+}
+
+#[inline]
+fn rotate_pos_ccw_90(pos: u8) -> u8 {
+    let row = pos / 8;
+    let col = pos % 8;
+    let new_row = col;
+    let new_col = 7 - row;
+    new_row * 8 + new_col
+}
+
+#[inline]
+fn rotate_pos_180(pos: u8) -> u8 {
+    63 - pos
+}
+
+#[inline]
+fn map_position_for_rotation(pos: u8, rotation: usize) -> u8 {
+    match rotation {
+        0 => pos,
+        1 => rotate_pos_cw_90(pos),
+        2 => rotate_pos_180(pos),
+        3 => rotate_pos_ccw_90(pos),
+        _ => unreachable!("rotation must be 0..3"),
+    }
+}
+
 /// # Arguments
 ///
 /// * `board` - 盤面状態（BitBoard）
@@ -280,11 +326,11 @@ pub fn extract_index(black: u64, white: u64, pattern: &Pattern, swap_colors: boo
 ///
 /// # Returns
 ///
-/// 56個のインデックスを含む`Vec<usize>`
-/// - indices\[0..13\]: 0°回転, patterns 0-13
-/// - indices\[14..27\]: 90°回転, patterns 0-13
-/// - indices\[28..41\]: 180°回転, patterns 0-13
-/// - indices\[42..55\]: 270°回転, patterns 0-13
+/// 各回転・各パターンのインデックスを含む`[usize; 56]`
+/// - indices[0..13]: 0°回転, patterns 0-13
+/// - indices[14..27]: 90°回転, patterns 0-13
+/// - indices[28..41]: 180°回転, patterns 0-13
+/// - indices[42..55]: 270°回転, patterns 0-13
 ///
 /// # Examples
 ///
@@ -313,54 +359,39 @@ pub fn extract_index(black: u64, white: u64, pattern: &Pattern, swap_colors: boo
 /// let indices = extract_all_patterns(&board, &patterns);
 /// assert_eq!(indices.len(), 56);
 /// ```
-pub fn extract_all_patterns(board: &crate::board::BitBoard, patterns: &[Pattern]) -> Vec<usize> {
-    // 56個のインデックスを格納する配列を事前確保
-    let mut indices = Vec::with_capacity(56);
-
-    // 0° rotation (no rotation): swap_colors=false
-    let board_0deg = *board;
-    for pattern in patterns {
-        let index = extract_index(board_0deg.black, board_0deg.white_mask(), pattern, false);
-        indices.push(index);
-    }
-
-    // 90° rotation: swap_colors=true
-    let board_90deg = board.rotate_90();
-    for pattern in patterns {
-        let index = extract_index(
-            board_90deg.black,
-            board_90deg.white_mask(),
-            pattern,
-            true, // swap_colors=true for 90° rotation
-        );
-        indices.push(index);
-    }
-
-    // 180° rotation: swap_colors=false
-    let board_180deg = board.rotate_180();
-    for pattern in patterns {
-        let index = extract_index(
-            board_180deg.black,
-            board_180deg.white_mask(),
-            pattern,
-            false,
-        );
-        indices.push(index);
-    }
-
-    // 270° rotation: swap_colors=true
-    let board_270deg = board.rotate_270();
-    for pattern in patterns {
-        let index = extract_index(
-            board_270deg.black,
-            board_270deg.white_mask(),
-            pattern,
-            true, // swap_colors=true for 270° rotation
-        );
-        indices.push(index);
-    }
-
+pub fn extract_all_patterns(board: &crate::board::BitBoard, patterns: &[Pattern]) -> [usize; 56] {
+    let mut indices = [0usize; 56];
+    extract_all_patterns_into(board, patterns, &mut indices);
     indices
+}
+
+/// 可変バッファにパターンインデックスを書き込む
+pub fn extract_all_patterns_into(
+    board: &crate::board::BitBoard,
+    patterns: &[Pattern],
+    out: &mut [usize; 56],
+) {
+    debug_assert_eq!(patterns.len(), 14, "Expected 14 patterns");
+    debug_assert_eq!(out.len(), 56, "Output buffer must have length 56");
+
+    let black = board.black;
+    let white = board.white_mask();
+
+    for rotation in 0..4 {
+        let swap_colors = rotation % 2 == 1;
+        for (pattern_idx, pattern) in patterns.iter().enumerate() {
+            let len = pattern.k as usize;
+            let mut rotated_positions = [0u8; 10];
+            for (i, pos) in pattern.positions.iter().enumerate().take(len) {
+                rotated_positions[i] = map_position_for_rotation(*pos, rotation);
+            }
+
+            let index =
+                extract_index_with_positions(black, white, &rotated_positions, len, swap_colors);
+
+            out[rotation * 14 + pattern_idx] = index;
+        }
+    }
 }
 
 /// patterns.csvからパターン定義を読み込む

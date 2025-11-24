@@ -34,15 +34,16 @@ impl Color {
 ///
 /// 黒石と白石をそれぞれu64のビットマスクで表現する。
 /// A1=bit 0, B1=bit 1, ..., H8=bit 63のマッピング。
-/// メモリレイアウト: 正確に16バイト（手番情報を上位ビットに埋め込み）
+/// メモリレイアウト: 24バイト（石配置16バイト + メタデータ1バイト + パディング）
 #[repr(C, align(8))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct BitBoard {
     /// 黒石の配置ビットマスク
     pub black: u64,
-    /// 白石の配置ビットマスク（最下位1ビット: 手番, 次の7ビット: move_count）
-    /// 実際の白石データは上位56ビットに格納
+    /// 白石の配置ビットマスク
     white: u64,
+    /// 手番・手数メタデータ（bit0: turn, bit1-7: move_count）
+    meta: u8,
 }
 
 impl std::fmt::Debug for BitBoard {
@@ -56,9 +57,30 @@ impl std::fmt::Debug for BitBoard {
     }
 }
 
-const TURN_MASK: u64 = 0x01;
-const MOVE_COUNT_MASK: u64 = 0xFE;
-const WHITE_MASK: u64 = !0xFF;
+const TURN_BIT: u8 = 0x01;
+const MOVE_COUNT_MASK: u8 = 0xFE;
+const NOT_A_FILE: u64 = 0xfefefefefefefefe;
+const NOT_H_FILE: u64 = 0x7f7f7f7f7f7f7f7f;
+const NOT_TOP_ROW: u64 = 0x00ffffffffffffff;
+const NOT_BOTTOM_ROW: u64 = 0xffffffffffffff00;
+const MASK_E: u64 = NOT_H_FILE;
+const MASK_W: u64 = NOT_A_FILE;
+const MASK_N: u64 = NOT_TOP_ROW;
+const MASK_S: u64 = NOT_BOTTOM_ROW;
+const MASK_NE: u64 = NOT_TOP_ROW & NOT_H_FILE;
+const MASK_NW: u64 = NOT_TOP_ROW & NOT_A_FILE;
+const MASK_SE: u64 = NOT_BOTTOM_ROW & NOT_H_FILE;
+const MASK_SW: u64 = NOT_BOTTOM_ROW & NOT_A_FILE;
+
+#[inline(always)]
+fn shift_left_masked(bits: u64, mask: u64, shift: u32) -> u64 {
+    (bits & mask) << shift
+}
+
+#[inline(always)]
+fn shift_right_masked(bits: u64, mask: u64, shift: u32) -> u64 {
+    (bits & mask) >> shift
+}
 
 impl BitBoard {
     /// 初期盤面を生成
@@ -82,20 +104,21 @@ impl BitBoard {
 
         Self {
             black,
-            white: white_stones, // 手番=Black(0), move_count=0がデフォルトで0
+            white: white_stones,
+            meta: 0,
         }
     }
 
-    /// 白石のビットマスクを取得（メタデータを除く）
+    /// 白石のビットマスクを取得
     #[inline]
     pub fn white_mask(&self) -> u64 {
-        self.white & WHITE_MASK
+        self.white
     }
 
     /// 現在の手番を取得
     #[inline]
     pub fn turn(&self) -> Color {
-        if (self.white & TURN_MASK) == 0 {
+        if (self.meta & TURN_BIT) == 0 {
             Color::Black
         } else {
             Color::White
@@ -105,13 +128,27 @@ impl BitBoard {
     /// 手数カウンタを取得
     #[inline]
     pub fn move_count(&self) -> u8 {
-        ((self.white & MOVE_COUNT_MASK) >> 1) as u8
+        (self.meta & MOVE_COUNT_MASK) >> 1
+    }
+
+    #[inline]
+    fn set_move_count(&mut self, count: u8) {
+        debug_assert!(count <= 60, "move_count must be <= 60");
+        self.meta = (self.meta & TURN_BIT) | ((count << 1) & MOVE_COUNT_MASK);
+    }
+
+    #[inline]
+    fn set_turn(&mut self, turn: Color) {
+        match turn {
+            Color::Black => self.meta &= !TURN_BIT,
+            Color::White => self.meta |= TURN_BIT,
+        }
     }
 
     /// 現在の手番のビットマスクを取得
     #[inline]
     pub fn current_player(&self) -> u64 {
-        if (self.white & TURN_MASK) == 0 {
+        if (self.meta & TURN_BIT) == 0 {
             self.black
         } else {
             self.white_mask()
@@ -121,7 +158,7 @@ impl BitBoard {
     /// 相手の手番のビットマスクを取得
     #[inline]
     pub fn opponent(&self) -> u64 {
-        if (self.white & TURN_MASK) == 0 {
+        if (self.meta & TURN_BIT) == 0 {
             self.white_mask()
         } else {
             self.black
@@ -142,12 +179,27 @@ impl BitBoard {
     /// assert_eq!(flipped.turn(), Color::White);
     /// ```
     pub fn flip(&self) -> Self {
-        let turn = (self.white & TURN_MASK) ^ 1;
-        let move_count = self.white & MOVE_COUNT_MASK;
-        Self {
+        let mut flipped = Self {
             black: self.white_mask(),
-            white: self.black | turn | move_count,
-        }
+            white: self.black,
+            meta: self.meta,
+        };
+        flipped.meta ^= TURN_BIT;
+        flipped
+    }
+
+    /// パスを適用し、石配置を維持したまま手番のみを切り替える
+    #[inline]
+    pub fn pass(&self) -> Self {
+        let mut next = *self;
+        next.meta ^= TURN_BIT;
+        next
+    }
+
+    /// 手番のみを反転（パス用）
+    #[inline]
+    pub fn toggle_turn(&mut self) {
+        self.meta ^= TURN_BIT;
     }
 
     /// Rotate bitboard 90 degrees counter-clockwise
@@ -165,15 +217,12 @@ impl BitBoard {
     /// ```
     pub fn rotate_90(&self) -> Self {
         let rotated_black = rotate_bits_90(self.black);
-        let rotated_white_stones = rotate_bits_90(self.white_mask());
-
-        // Clear lower 8 bits from rotated white stones, then add metadata
-        let metadata = self.white & (TURN_MASK | MOVE_COUNT_MASK);
-        let rotated_white = (rotated_white_stones & WHITE_MASK) | metadata;
+        let rotated_white = rotate_bits_90(self.white_mask());
 
         Self {
             black: rotated_black,
             white: rotated_white,
+            meta: self.meta,
         }
     }
 
@@ -193,15 +242,12 @@ impl BitBoard {
     #[inline]
     pub fn rotate_180(&self) -> Self {
         let rotated_black = self.black.reverse_bits();
-        let rotated_white_stones = self.white_mask().reverse_bits();
-
-        // Clear lower 8 bits from rotated white stones, then add metadata
-        let metadata = self.white & (TURN_MASK | MOVE_COUNT_MASK);
-        let rotated_white = (rotated_white_stones & WHITE_MASK) | metadata;
+        let rotated_white = self.white_mask().reverse_bits();
 
         Self {
             black: rotated_black,
             white: rotated_white,
+            meta: self.meta,
         }
     }
 
@@ -220,15 +266,12 @@ impl BitBoard {
     /// ```
     pub fn rotate_270(&self) -> Self {
         let rotated_black = rotate_bits_270(self.black);
-        let rotated_white_stones = rotate_bits_270(self.white_mask());
-
-        // Clear lower 8 bits from rotated white stones, then add metadata
-        let metadata = self.white & (TURN_MASK | MOVE_COUNT_MASK);
-        let rotated_white = (rotated_white_stones & WHITE_MASK) | metadata;
+        let rotated_white = rotate_bits_270(self.white_mask());
 
         Self {
             black: rotated_black,
             white: rotated_white,
+            meta: self.meta,
         }
     }
 }
@@ -377,6 +420,8 @@ pub struct UndoInfo {
     pub turn: Color,
     /// 着手前の手数
     pub move_count: u8,
+    pub pos: u8,
+    pub flipped: u64,
 }
 
 /// ゲームの状態を表す列挙型
@@ -438,64 +483,136 @@ pub enum GameState {
 /// assert_ne!(moves, 0); // 初期盤面には合法手が存在
 /// assert_eq!(moves.count_ones(), 4); // 初期盤面には4つの合法手
 /// ```
+#[inline(always)]
+fn line_moves_positive(player: u64, opponent: u64, shift: u32, mask: u64) -> u64 {
+    let mut candidates = opponent & shift_left_masked(player, mask, shift);
+    candidates |= opponent & shift_left_masked(candidates, mask, shift);
+    candidates |= opponent & shift_left_masked(candidates, mask, shift);
+    candidates |= opponent & shift_left_masked(candidates, mask, shift);
+    candidates |= opponent & shift_left_masked(candidates, mask, shift);
+    candidates |= opponent & shift_left_masked(candidates, mask, shift);
+    shift_left_masked(candidates, mask, shift)
+}
+
+#[inline(always)]
+fn line_moves_negative(player: u64, opponent: u64, shift: u32, mask: u64) -> u64 {
+    let mut candidates = opponent & shift_right_masked(player, mask, shift);
+    candidates |= opponent & shift_right_masked(candidates, mask, shift);
+    candidates |= opponent & shift_right_masked(candidates, mask, shift);
+    candidates |= opponent & shift_right_masked(candidates, mask, shift);
+    candidates |= opponent & shift_right_masked(candidates, mask, shift);
+    candidates |= opponent & shift_right_masked(candidates, mask, shift);
+    shift_right_masked(candidates, mask, shift)
+}
+
 #[inline]
 pub fn legal_moves(board: &BitBoard) -> u64 {
+    debug_assert_eq!(
+        board.black & board.white_mask(),
+        0,
+        "BitBoard contains overlapping stones\n{}",
+        display(board, false)
+    );
     let player = board.current_player();
     let opponent = board.opponent();
     let empty = !(player | opponent);
 
     let mut moves = 0u64;
+    moves |= empty & line_moves_positive(player, opponent, 1, MASK_E);
+    moves |= empty & line_moves_negative(player, opponent, 1, MASK_W);
+    moves |= empty & line_moves_positive(player, opponent, 8, MASK_N);
+    moves |= empty & line_moves_negative(player, opponent, 8, MASK_S);
+    moves |= empty & line_moves_positive(player, opponent, 7, MASK_NW);
+    moves |= empty & line_moves_negative(player, opponent, 7, MASK_SE);
+    moves |= empty & line_moves_positive(player, opponent, 9, MASK_NE);
+    moves |= empty & line_moves_negative(player, opponent, 9, MASK_SW);
 
-    // 8方向それぞれについて処理
-    // ループアンローリングは不要（コンパイラが最適化）
-    for &dir in &DIRECTIONS {
-        // 現在のプレイヤーの石から指定方向に1マスシフトし、相手の石と重なる位置を検出
-        let mut candidates = shift(player, dir) & opponent;
-
-        // 相手の石が連続する範囲を追跡
-        // ARM64: candidates != 0 はCCMP命令で最適化される
-        while candidates != 0 {
-            let next = shift(candidates, dir);
-            // 空マスに到達したら、それが合法手
-            moves |= next & empty;
-            // 相手の石が続く場合のみ継続
-            candidates = next & opponent;
+    if cfg!(debug_assertions) {
+        let mut bits = moves;
+        while bits != 0 {
+            let pos = bits.trailing_zeros() as u8;
+            let move_bit = 1u64 << pos;
+            let flips = compute_flips(player, opponent, move_bit);
+            if flips == 0 {
+                eprintln!(
+                    "legal_moves produced illegal move (pos={}, player={:016x}, opponent={:016x}, mask={:016x})\n{}",
+                    pos,
+                    player,
+                    opponent,
+                    moves,
+                    display(board, false)
+                );
+                let dir_masks = [
+                    ("E", line_moves_positive(player, opponent, 1, MASK_E)),
+                    ("W", line_moves_negative(player, opponent, 1, MASK_W)),
+                    ("N", line_moves_positive(player, opponent, 8, MASK_N)),
+                    ("S", line_moves_negative(player, opponent, 8, MASK_S)),
+                    ("NE", line_moves_positive(player, opponent, 9, MASK_NE)),
+                    ("SW", line_moves_negative(player, opponent, 9, MASK_SW)),
+                    ("NW", line_moves_positive(player, opponent, 7, MASK_NW)),
+                    ("SE", line_moves_negative(player, opponent, 7, MASK_SE)),
+                ];
+                for (label, dir_mask) in dir_masks.iter() {
+                    if dir_mask & move_bit != 0 {
+                        eprintln!("  direction {} contributed to move", label);
+                    }
+                }
+            }
+            debug_assert!(
+                flips != 0,
+                "legal_moves produced illegal move (pos={}, player={:016x}, opponent={:016x}, mask={:016x})\n{}",
+                pos,
+                player,
+                opponent,
+                moves,
+                display(board, false)
+            );
+            bits &= bits - 1;
         }
     }
-
     moves
 }
 
-/// 指定方向で反転される石を検出
-///
-/// 着手位置から指定方向に走査し、挟まれる相手の石をビットマスクで返す。
-///
-/// # Arguments
-///
-/// * `board` - 現在の盤面状態
-/// * `pos` - 着手位置（0-63）
-/// * `dir` - 走査方向（DIRECTIONS配列の値）
-///
-/// # Returns
-///
-/// 反転される石のビットマスク。挟めない場合は0。
-#[inline]
-fn find_flipped_in_direction(board: &BitBoard, pos: u8, dir: i32) -> u64 {
-    let player = board.current_player();
-    let opponent = board.opponent();
-
-    // 着手位置から指定方向に1マスずつ進む
-    let mut current = shift(1u64 << pos, dir);
-    let mut flipped = 0u64;
-
-    // 相手の石が続く限り追跡
-    while (current & opponent) != 0 {
-        flipped |= current;
-        current = shift(current, dir);
+#[inline(always)]
+fn line_flips_positive(move_bit: u64, player: u64, opponent: u64, shift: u32, mask: u64) -> u64 {
+    let mut captured = opponent & shift_left_masked(move_bit, mask, shift);
+    captured |= opponent & shift_left_masked(captured, mask, shift);
+    captured |= opponent & shift_left_masked(captured, mask, shift);
+    captured |= opponent & shift_left_masked(captured, mask, shift);
+    captured |= opponent & shift_left_masked(captured, mask, shift);
+    captured |= opponent & shift_left_masked(captured, mask, shift);
+    if (shift_left_masked(captured, mask, shift) & player) != 0 {
+        captured
+    } else {
+        0
     }
+}
 
-    // 最後に自分の石に到達した場合のみ反転が有効
-    if (current & player) != 0 { flipped } else { 0 }
+#[inline(always)]
+fn line_flips_negative(move_bit: u64, player: u64, opponent: u64, shift: u32, mask: u64) -> u64 {
+    let mut captured = opponent & shift_right_masked(move_bit, mask, shift);
+    captured |= opponent & shift_right_masked(captured, mask, shift);
+    captured |= opponent & shift_right_masked(captured, mask, shift);
+    captured |= opponent & shift_right_masked(captured, mask, shift);
+    captured |= opponent & shift_right_masked(captured, mask, shift);
+    captured |= opponent & shift_right_masked(captured, mask, shift);
+    if (shift_right_masked(captured, mask, shift) & player) != 0 {
+        captured
+    } else {
+        0
+    }
+}
+
+#[inline(always)]
+fn compute_flips(player: u64, opponent: u64, move_bit: u64) -> u64 {
+    line_flips_positive(move_bit, player, opponent, 1, MASK_E)
+        | line_flips_negative(move_bit, player, opponent, 1, MASK_W)
+        | line_flips_positive(move_bit, player, opponent, 8, MASK_N)
+        | line_flips_negative(move_bit, player, opponent, 8, MASK_S)
+        | line_flips_positive(move_bit, player, opponent, 9, MASK_NE)
+        | line_flips_negative(move_bit, player, opponent, 9, MASK_SW)
+        | line_flips_positive(move_bit, player, opponent, 7, MASK_NW)
+        | line_flips_negative(move_bit, player, opponent, 7, MASK_SE)
 }
 
 /// 着手を実行し、石を反転する
@@ -533,62 +650,72 @@ fn find_flipped_in_direction(board: &BitBoard, pos: u8, dir: i32) -> u64 {
 /// let undo_info = make_move(&mut board, first_move).unwrap();
 /// ```
 pub fn make_move(board: &mut BitBoard, pos: u8) -> Result<UndoInfo, GameError> {
-    // 範囲チェック
     if pos >= 64 {
         return Err(GameError::OutOfBounds(pos));
     }
 
-    // 合法手チェック
     let legal = legal_moves(board);
     if legal & (1 << pos) == 0 {
         return Err(GameError::IllegalMove(pos));
     }
 
-    // Undo情報を保存
-    let undo = UndoInfo {
+    Ok(apply_move_unchecked(board, pos))
+}
+
+/// 合法性チェックを省略した高速版 make_move
+#[inline]
+pub fn make_move_unchecked(board: &mut BitBoard, pos: u8) -> UndoInfo {
+    debug_assert!(pos < 64, "position must be within board bounds");
+    debug_assert!(
+        (legal_moves(board) & (1u64 << pos)) != 0,
+        "make_move_unchecked requires a legal move"
+    );
+    apply_move_unchecked(board, pos)
+}
+
+#[inline(always)]
+fn apply_move_unchecked(board: &mut BitBoard, pos: u8) -> UndoInfo {
+    let mut undo = UndoInfo {
         black: board.black,
         white_mask: board.white_mask(),
         turn: board.turn(),
         move_count: board.move_count(),
+        pos,
+        flipped: 0,
     };
 
-    // 8方向で反転される石を検出
-    let mut all_flipped = 0u64;
-    for &dir in &DIRECTIONS {
-        all_flipped |= find_flipped_in_direction(board, pos, dir);
-    }
+    let player_bits = board.current_player();
+    let opponent_bits = board.opponent();
+    let move_bit = 1u64 << pos;
+    let all_flipped = compute_flips(player_bits, opponent_bits, move_bit);
+    debug_assert!(
+        all_flipped != 0,
+        "legal move must flip at least one disc (pos={}, turn={:?}, legal_moves={:016x})\n{}",
+        pos,
+        board.turn(),
+        legal_moves(board),
+        display(board, false)
+    );
 
-    // メタデータを事前に保存
-    let old_metadata = board.white & (TURN_MASK | MOVE_COUNT_MASK);
+    undo.flipped = all_flipped;
 
-    // 現在の手番に応じて石を配置・反転
     let turn = board.turn();
     if turn == Color::Black {
-        // 黒石を配置
-        board.black |= 1u64 << pos;
-        // 反転した石を黒に
+        board.black |= move_bit;
         board.black |= all_flipped;
-        // 白から除去（メタデータを保持）
-        board.white = (board.white & !all_flipped & WHITE_MASK) | old_metadata;
+        board.white &= !all_flipped;
     } else {
-        // 白石を配置
-        let white_stones = board.white_mask() | (1u64 << pos);
-        // 反転した石も白に
-        board.white = (white_stones | all_flipped) & WHITE_MASK;
-        // 黒から除去
+        board.white |= move_bit;
+        board.white |= all_flipped;
         board.black &= !all_flipped;
-        // メタデータを復元
-        board.white |= old_metadata;
     }
 
-    // 手番を切り替え
-    board.white ^= TURN_MASK;
+    board.toggle_turn();
 
-    // 手数を増加
     let new_move_count = board.move_count() + 1;
-    board.white = (board.white & !MOVE_COUNT_MASK) | ((new_move_count as u64) << 1);
+    board.set_move_count(new_move_count);
 
-    Ok(undo)
+    undo
 }
 
 /// 着手を取り消し、元の状態に復元する
@@ -618,11 +745,9 @@ pub fn make_move(board: &mut BitBoard, pos: u8) -> Result<UndoInfo, GameError> {
 /// ```
 pub fn undo_move(board: &mut BitBoard, undo: UndoInfo) {
     board.black = undo.black;
-
-    // 白石とメタデータを復元
-    let turn_bit = if undo.turn == Color::Black { 0 } else { 1 };
-    let move_count_bits = (undo.move_count as u64) << 1;
-    board.white = undo.white_mask | turn_bit | move_count_bits;
+    board.white = undo.white_mask;
+    board.set_turn(undo.turn);
+    board.set_move_count(undo.move_count);
 }
 
 /// 最終スコアを計算
@@ -821,8 +946,8 @@ mod tests {
 
     #[test]
     fn test_bitboard_size() {
-        // BitBoardは16バイト以内
-        assert!(std::mem::size_of::<BitBoard>() <= 16);
+        // BitBoardは24バイト以内（石配置16バイト + メタデータ1バイト + パディング）
+        assert!(std::mem::size_of::<BitBoard>() <= 24);
     }
 
     #[test]
@@ -1022,11 +1147,11 @@ mod tests {
 
     #[test]
     fn test_rotation_with_complex_pattern() {
-        // Test with a more complex stone pattern
-        // Use rows 2-7 (bits 8-55) to avoid metadata conflicts
+        // Test with a more complex stone pattern using rows 2-7 (bits 8-55)
         let board = BitBoard {
             black: 0x0000_0000_0000_FF00, // Row 2 (A2-H2)
             white: 0x00FF_0000_0000_0000, // Row 7 (A7-H7)
+            meta: 0,
         };
 
         let rot180 = board.rotate_180();
@@ -1304,6 +1429,7 @@ mod tests {
         let board = BitBoard {
             black: 0xFFFF_FFFF_FFFF_FFFF,
             white: 0,
+            meta: 0,
         };
 
         let moves = legal_moves(&board);
@@ -1315,13 +1441,14 @@ mod tests {
         // 水平方向の挟み込みをテスト
         // Row 5: D5(黒) E5(白) F5(空)
         // 黒はF5に打つことでE5を挟める
-        // Use row 5 to avoid metadata conflicts (bits 32-39)
+        // Use row 5 (bits 32-39) for clarity
         let mut board = BitBoard {
             black: 1 << 35, // D5
             white: 0,
+            meta: 0,
         };
-        // Set white stone at E5 (bit 36), avoiding lower 8 bits
-        board.white = (1u64 << 36) & WHITE_MASK;
+        // Set white stone at E5 (bit 36)
+        board.white = 1u64 << 36;
 
         let moves = legal_moves(&board);
         assert_ne!(moves & (1 << 37), 0, "F5 should be a legal move");
@@ -1334,8 +1461,9 @@ mod tests {
         let mut board = BitBoard {
             black: 1 << 28, // E4
             white: 0,
+            meta: 0,
         };
-        board.white = (1u64 << 36) & WHITE_MASK; // E5
+        board.white = 1u64 << 36; // E5
 
         let moves = legal_moves(&board);
         assert_ne!(moves & (1 << 44), 0, "E6 should be a legal move");
@@ -1348,8 +1476,9 @@ mod tests {
         let mut board = BitBoard {
             black: 1 << 27, // D4
             white: 0,
+            meta: 0,
         };
-        board.white = (1u64 << 36) & WHITE_MASK; // E5
+        board.white = 1u64 << 36; // E5
 
         let moves = legal_moves(&board);
         assert_ne!(moves & (1 << 45), 0, "F6 should be a legal move");
@@ -1362,8 +1491,9 @@ mod tests {
         let mut board = BitBoard {
             black: (1 << 27) | (1 << 35) | (1 << 28), // D4, D5, E4
             white: 0,
+            meta: 0,
         };
-        board.white = (1u64 << 36) & WHITE_MASK; // E5
+        board.white = 1u64 << 36; // E5
 
         let moves = legal_moves(&board);
         // E6は縦方向でE5を挟める
@@ -1379,8 +1509,9 @@ mod tests {
         let mut board = BitBoard {
             black: 1 << 27, // D4
             white: 0,
+            meta: 0,
         };
-        board.white = ((1u64 << 28) | (1u64 << 29)) & WHITE_MASK; // E4, F4
+        board.white = (1u64 << 28) | (1u64 << 29); // E4, F4
 
         let moves = legal_moves(&board);
         assert_ne!(
@@ -1411,6 +1542,7 @@ mod tests {
         let board = BitBoard {
             black: 1 << 27, // D4 only
             white: 0,
+            meta: 0,
         };
 
         let moves = legal_moves(&board);
@@ -1418,6 +1550,59 @@ mod tests {
             moves, 0,
             "No legal moves without opponent stones to capture"
         );
+    }
+
+    #[test]
+    fn test_legal_moves_no_false_positive_in_complex_position() {
+        // Regression test for a position that previously produced false positives
+        let mut board = BitBoard {
+            black: 0x0000_0139_3020_0080,
+            white: 0x0000_0006_0fdf_ff7f,
+            meta: 0,
+        };
+        board.set_turn(Color::Black);
+        board.set_move_count(33);
+
+        let moves = legal_moves(&board);
+        assert_eq!(
+            moves & (1u64 << 43),
+            0,
+            "D6 should not be reported as legal"
+        );
+    }
+
+    #[test]
+    fn test_legal_moves_detects_edge_capture() {
+        let mut board = BitBoard {
+            black: 0x0000_0008_100a_0000,
+            white: 0x0000_0010_0804_0200,
+            meta: 0,
+        };
+        board.set_turn(Color::Black);
+        board.set_move_count(4);
+
+        let moves = legal_moves(&board);
+        assert_ne!(
+            moves & (1u64 << 1),
+            0,
+            "B1 should be a legal move for Black"
+        );
+
+        let mut played = board;
+        let undo = make_move(&mut played, 1).expect("move should be legal");
+        assert_ne!(
+            played.black & (1u64 << 1),
+            0,
+            "Stone should be placed at B1"
+        );
+        assert_eq!(
+            played.white_mask() & (1u64 << 9),
+            0,
+            "B2 should be flipped to black"
+        );
+
+        undo_move(&mut played, undo);
+        assert_eq!(played, board, "Undo should restore the original board");
     }
 
     #[test]
@@ -1608,8 +1793,9 @@ mod tests {
         let mut board = BitBoard {
             black: 1 << 35, // D5
             white: 0,
+            meta: 0,
         };
-        board.white = (1u64 << 36) & WHITE_MASK; // E5
+        board.white = 1u64 << 36; // E5
 
         make_move(&mut board, 37).unwrap(); // F5
 
@@ -1625,8 +1811,9 @@ mod tests {
         let mut board = BitBoard {
             black: 1 << 28, // E4
             white: 0,
+            meta: 0,
         };
-        board.white = (1u64 << 36) & WHITE_MASK; // E5
+        board.white = 1u64 << 36; // E5
 
         make_move(&mut board, 44).unwrap(); // E6
 
@@ -1641,8 +1828,9 @@ mod tests {
         let mut board = BitBoard {
             black: 1 << 27, // D4
             white: 0,
+            meta: 0,
         };
-        board.white = (1u64 << 36) & WHITE_MASK; // E5
+        board.white = 1u64 << 36; // E5
 
         make_move(&mut board, 45).unwrap(); // F6
 
@@ -1657,8 +1845,9 @@ mod tests {
         let mut board = BitBoard {
             black: 1 << 27, // D4
             white: 0,
+            meta: 0,
         };
-        board.white = ((1u64 << 28) | (1u64 << 29)) & WHITE_MASK; // E4, F4
+        board.white = (1u64 << 28) | (1u64 << 29); // E4, F4
 
         make_move(&mut board, 30).unwrap(); // G4
 
@@ -1882,6 +2071,8 @@ mod tests {
             white_mask: original.white_mask(),
             turn: original.turn(),
             move_count: original.move_count(),
+            pos: 19,
+            flipped: 0,
         };
         undo_move(&mut board, undo_info);
         assert_eq!(board, original, "undo_move should restore original state");
@@ -1945,6 +2136,7 @@ mod tests {
         let black_winning = BitBoard {
             black: 0x00FF_FFFF_0000_0000, // 24 bits in rows 5-7
             white: 0x0000_0000_FFFF_FF00, // 24 bits in rows 2-4
+            meta: 0,
         };
         let score = final_score(&black_winning);
         assert_eq!(score, 0, "Equal stones should have score 0");
@@ -1953,6 +2145,7 @@ mod tests {
         let black_really_winning = BitBoard {
             black: 0xFFFF_FFFF_0000_0000, // 32 bits
             white: 0x0000_0000_0000_FF00, // 8 bits
+            meta: 0,
         };
         let score = final_score(&black_really_winning);
         assert!(score > 0, "Black should have positive score");
@@ -1962,6 +2155,7 @@ mod tests {
         let white_winning = BitBoard {
             black: 0x0000_0000_0000_FF00, // 8 bits (row 2)
             white: 0xFFFF_FFFF_0000_0000, // 32 bits
+            meta: 0,
         };
         let score = final_score(&white_winning);
         assert!(score < 0, "White should have negative score");
@@ -1974,13 +2168,15 @@ mod tests {
         let all_black = BitBoard {
             black: 0xFFFF_FFFF_FFFF_FFFF,
             white: 0,
+            meta: 0,
         };
         let score = final_score(&all_black);
         assert_eq!(score, 64, "All black should be +64");
 
         let all_white = BitBoard {
             black: 0,
-            white: 0xFFFF_FFFF_FFFF_FF00, // Upper 56 bits (avoiding metadata)
+            white: 0xFFFF_FFFF_FFFF_FF00,
+            meta: 0,
         };
         let score = final_score(&all_white);
         assert_eq!(score, -56, "All white should be negative");
@@ -1994,6 +2190,7 @@ mod tests {
         let board = BitBoard {
             black: 0xFFFF_FFFF_FFFF_FFFF, // All 64 bits
             white: 0,                     // No white stones
+            meta: 0,
         };
 
         let state = check_game_state(&board);
@@ -2011,10 +2208,11 @@ mod tests {
     fn test_task_4_2_full_board_game_over() {
         // 全64マスが埋まった際にゲーム終了を返す
         // Create a board where all 64 squares are occupied
-        // Note: white_mask() excludes lower 8 bits, so we put those bits in black
+        // Construct a board where all 64 squares are occupied
         let board = BitBoard {
             black: 0xFFFF_FFFF_0000_00FF, // 32 + 8 = 40 stones (upper half + row 1)
             white: 0x0000_0000_FFFF_FF00, // 24 stones (rows 2-4)
+            meta: 0,
         };
 
         // Verify we have 64 total stones
@@ -2071,7 +2269,7 @@ mod tests {
 
         // Manually set move count to 60 (simulating end of game)
         // We'll set the move_count bits directly
-        board.white = (board.white & !MOVE_COUNT_MASK) | ((60u64) << 1);
+        board.set_move_count(60);
 
         let state = check_game_state(&board);
         match state {
