@@ -692,27 +692,47 @@ pub fn order_moves(moves: u64, tt_best_move: Option<u8>) -> ([u8; 32], usize) {
     let mut move_list = [0u8; 32];
     let mut count = 0;
 
-    // TT最善手を先頭に
-    if let Some(tt_move) = tt_best_move
-        && moves & (1u64 << tt_move) != 0
-    {
-        move_list[count] = tt_move;
-        count += 1;
-    }
-
-    // 残りの手を追加
+    // 合法手を配列に追加
     let mut move_bits = moves;
     while move_bits != 0 {
         let pos = move_bits.trailing_zeros() as u8;
-        move_bits &= move_bits - 1;
-
-        // TT最善手は既に追加済みなのでスキップ
-        if Some(pos) == tt_best_move {
-            continue;
-        }
-
         move_list[count] = pos;
         count += 1;
+        move_bits &= move_bits - 1;
+    }
+
+    // 優先順位付け関数
+    let priority = |pos: u8| -> i32 {
+        // TT最善手の判定
+        let tt_bonus = if let Some(tt_move) = tt_best_move {
+            if pos == tt_move { 1000 } else { 0 }
+        } else {
+            0
+        };
+
+        // 角: 優先度100
+        let corner_bonus = if is_corner_branchless(pos) { 100 } else { 0 };
+
+        // X打ち: 優先度-60（低優先度）
+        let x_penalty = if is_x_square_branchless(pos) { -60 } else { 0 };
+
+        // 辺: 優先度50
+        let edge_bonus = if is_edge_branchless(pos) { 50 } else { 0 };
+
+        let base_score = 10;
+        tt_bonus + corner_bonus + x_penalty + edge_bonus + base_score
+    };
+
+    // 挿入ソート（小規模配列に効率的）
+    for i in 1..count {
+        let key = move_list[i];
+        let key_priority = priority(key);
+        let mut j = i;
+        while j > 0 && priority(move_list[j - 1]) < key_priority {
+            move_list[j] = move_list[j - 1];
+            j -= 1;
+        }
+        move_list[j] = key;
     }
 
     (move_list, count)
@@ -1067,7 +1087,13 @@ pub fn complete_search(
     }
 
     // ムーブオーダリング: 置換表の最善手を優先
-    let tt_best_move = ctx.tt.probe(hash).map(|e| e.best_move);
+    let tt_best_move = ctx.tt.probe(hash).and_then(|e| {
+        if e.best_move != 255 {
+            Some(e.best_move)
+        } else {
+            None
+        }
+    });
     let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
 
     let mut best_score = alpha as f32;
@@ -2345,12 +2371,9 @@ mod tests {
         let moves = 0u64;
         let tt_best_move = None;
 
-        let (ordered_moves, _) = order_moves(moves, tt_best_move);
+        let (_, move_count) = order_moves(moves, tt_best_move);
 
-        assert!(
-            ordered_moves.is_empty(),
-            "Empty moves should return empty Vec"
-        );
+        assert_eq!(move_count, 0, "Empty moves should return move_count of 0");
     }
 
     #[test]
