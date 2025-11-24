@@ -3,7 +3,7 @@
 //! Negamax、AlphaBeta、MTD(f)探索を実装し、Phase 3学習システムへの統合APIを提供する。
 
 use crate::board::{
-    BitBoard, GameState, check_game_state, final_score, legal_moves, make_move, undo_move,
+    BitBoard, GameState, check_game_state, final_score, legal_moves, make_move_unchecked, undo_move,
 };
 use crate::evaluator::Evaluator;
 use thiserror::Error;
@@ -513,20 +513,20 @@ pub fn negamax(
 
         // 着手を実行
         let mut new_board = *board;
-        if let Ok(undo_info) = make_move(&mut new_board, pos) {
-            // 再帰的に探索（符号反転でNegamaxの原則を適用）
-            let (score, _) = negamax(&new_board, depth - 1, evaluator, _zobrist, nodes);
-            let negamax_score = -score;
+        let undo_info = make_move_unchecked(&mut new_board, pos);
 
-            // 最大評価値を選択
-            if negamax_score > best_score {
-                best_score = negamax_score;
-                best_move = Some(pos);
-            }
+        // 再帰的に探索（符号反転でNegamaxの原則を適用）
+        let (score, _) = negamax(&new_board, depth - 1, evaluator, _zobrist, nodes);
+        let negamax_score = -score;
 
-            // 着手を取り消し
-            undo_move(&mut new_board, undo_info);
+        // 最大評価値を選択
+        if negamax_score > best_score {
+            best_score = negamax_score;
+            best_move = Some(pos);
         }
+
+        // 着手を取り消し
+        undo_move(&mut new_board, undo_info);
     }
 
     (best_score, best_move)
@@ -847,39 +847,39 @@ pub fn alpha_beta(
     for pos in ordered_moves.iter().take(move_count) {
         let pos = *pos;
         // 着手を実行
-        if let Ok(undo_info) = make_move(board, pos) {
-            // 再帰的に探索（符号反転でNegamaxの原則を適用）
-            let (score, _) = alpha_beta(board, depth - 1, -beta, -alpha, ctx);
-            let negamax_score = -score;
+        let undo_info = make_move_unchecked(board, pos);
 
-            // 着手を取り消し
-            undo_move(board, undo_info);
+        // 再帰的に探索（符号反転でNegamaxの原則を適用）
+        let (score, _) = alpha_beta(board, depth - 1, -beta, -alpha, ctx);
+        let negamax_score = -score;
 
-            // 最大評価値を選択（fail-soft）
-            if negamax_score > best_score {
-                best_score = negamax_score;
-                best_move = Some(pos);
-            }
+        // 着手を取り消し
+        undo_move(board, undo_info);
 
-            // alpha値を更新
-            if negamax_score > alpha as f32 {
-                alpha = negamax_score as i32;
-            }
+        // 最大評価値を選択（fail-soft）
+        if negamax_score > best_score {
+            best_score = negamax_score;
+            best_move = Some(pos);
+        }
 
-            // beta cut（枝刈り）
-            if alpha >= beta {
-                // 置換表に下限（Lower Bound）を保存
-                let entry = TTEntry::new(
-                    hash,
-                    depth as i8,
-                    Bound::Lower,
-                    best_score as i16,
-                    best_move.unwrap_or(255),
-                    ctx.tt.current_age,
-                );
-                ctx.tt.store(hash, entry);
-                return (best_score, best_move);
-            }
+        // alpha値を更新
+        if negamax_score > alpha as f32 {
+            alpha = negamax_score as i32;
+        }
+
+        // beta cut（枝刈り）
+        if alpha >= beta {
+            // 置換表に下限（Lower Bound）を保存
+            let entry = TTEntry::new(
+                hash,
+                depth as i8,
+                Bound::Lower,
+                best_score as i16,
+                best_move.unwrap_or(255),
+                ctx.tt.current_age,
+            );
+            ctx.tt.store(hash, entry);
+            return (best_score, best_move);
         }
     }
 
@@ -956,27 +956,15 @@ pub fn complete_search(
     // ノード数をカウント
     ctx.stats.nodes += 1;
 
-    // ゲーム状態を確認
-    let game_state = check_game_state(board);
-    match game_state {
-        GameState::GameOver(score) => {
-            // 終局: 最終スコア×100を返す
-            return ((score as f32) * 100.0, None);
-        }
-        GameState::Pass => {
-            // パス: 盤面を反転して探索継続
-            *board = board.flip();
-            let new_hash = hash ^ ctx.zobrist.turn;
-            let (score, _) = complete_search(board, -beta, -alpha, new_hash, ctx);
-            *board = board.flip();
-            return (-score, None);
-        }
-        GameState::Playing => {
-            // 探索継続
-        }
+    let remaining_moves = 60 - board.move_count() as i32;
+    if remaining_moves <= 0 {
+        let final_score_val = final_score(board);
+        return ((final_score_val as f32) * 100.0, None);
     }
 
-    if let Some(entry) = ctx.tt.probe(hash) {
+    let tt_entry = ctx.tt.probe(hash);
+
+    if let Some(entry) = tt_entry {
         ctx.stats.tt_hits += 1;
 
         let tt_score = entry.score as f32;
@@ -984,14 +972,23 @@ pub fn complete_search(
         match entry.bound {
             Bound::Exact => {
                 // 正確な評価値
-                return (tt_score, Some(entry.best_move));
+                let best = if entry.best_move != 255 {
+                    Some(entry.best_move)
+                } else {
+                    None
+                };
+                return (tt_score, best);
             }
             Bound::Lower => {
                 if tt_score >= beta as f32 {
-                    return (tt_score, Some(entry.best_move));
+                    let best = if entry.best_move != 255 {
+                        Some(entry.best_move)
+                    } else {
+                        None
+                    };
+                    return (tt_score, best);
                 }
                 // alphaの改善（深さチェック付き）
-                let remaining_moves = 60 - board.move_count();
                 if entry.depth >= remaining_moves as i8 {
                     alpha = alpha.max(entry.score as i32);
                 }
@@ -1007,15 +1004,19 @@ pub fn complete_search(
     // 合法手を取得
     let moves = legal_moves(board);
     if moves == 0 {
-        *board = board.flip();
+        let mut flipped_board = board.flip();
+        if legal_moves(&flipped_board) == 0 {
+            let final_score_val = final_score(board);
+            return ((final_score_val as f32) * 100.0, None);
+        }
+
         let new_hash = hash ^ ctx.zobrist.turn;
-        let (score, _) = complete_search(board, -beta, -alpha, new_hash, ctx);
-        *board = board.flip();
+        let (score, _) = complete_search(&mut flipped_board, -beta, -alpha, new_hash, ctx);
         return (-score, None);
     }
 
     // ムーブオーダリング: 置換表の最善手を優先
-    let tt_best_move = ctx.tt.probe(hash).and_then(|e| {
+    let tt_best_move = tt_entry.and_then(|e| {
         if e.best_move != 255 {
             Some(e.best_move)
         } else {
@@ -1024,21 +1025,21 @@ pub fn complete_search(
     });
     let (ordered_moves, move_count) = order_moves_branchless(moves, tt_best_move);
 
-    let mut best_score = alpha as f32;
+    let original_alpha = alpha;
+    let mut best_score = f32::NEG_INFINITY;
     let mut best_move = None;
 
     // 全合法手を探索
     for mv in ordered_moves.iter().take(move_count) {
         let mv = *mv;
-        let undo = make_move(board, mv).unwrap();
+        let undo = make_move_unchecked(board, mv);
 
         let is_black = undo.turn == crate::board::Color::Black;
         let new_hash = ctx
             .zobrist
             .update_hash(hash, undo.pos, undo.flipped, is_black);
 
-        let (score, _) =
-            complete_search(board, -beta, -(alpha.max(best_score as i32)), new_hash, ctx);
+        let (score, _) = complete_search(board, -beta, -alpha, new_hash, ctx);
         let score = -score;
 
         undo_move(board, undo);
@@ -1046,35 +1047,39 @@ pub fn complete_search(
         if score > best_score {
             best_score = score;
             best_move = Some(mv);
+        }
 
-            // Beta cutoff
-            if best_score >= beta as f32 {
-                // 置換表に保存（Lower bound）
-                let entry = TTEntry::new(
-                    hash,
-                    (60 - board.move_count()) as i8,
-                    Bound::Lower,
-                    best_score as i16,
-                    mv,
-                    ctx.tt.current_age,
-                );
-                ctx.tt.store(hash, entry);
+        if best_score > alpha as f32 {
+            alpha = best_score as i32;
+        }
 
-                return (best_score, best_move);
-            }
+        // Beta cutoff
+        if alpha >= beta {
+            // 置換表に保存（Lower bound）
+            let entry = TTEntry::new(
+                hash,
+                remaining_moves as i8,
+                Bound::Lower,
+                best_score as i16,
+                mv,
+                ctx.tt.current_age,
+            );
+            ctx.tt.store(hash, entry);
+
+            return (best_score, best_move);
         }
     }
 
     // 置換表に保存
-    let bound = if best_score > alpha as f32 {
-        Bound::Exact
-    } else {
+    let bound = if best_score <= original_alpha as f32 {
         Bound::Upper
+    } else {
+        Bound::Exact
     };
 
     let entry = TTEntry::new(
         hash,
-        (60 - board.move_count()) as i8,
+        remaining_moves as i8,
         bound,
         best_score as i16,
         best_move.unwrap_or(255),

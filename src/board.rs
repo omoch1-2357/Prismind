@@ -59,6 +59,18 @@ impl std::fmt::Debug for BitBoard {
 const TURN_MASK: u64 = 0x01;
 const MOVE_COUNT_MASK: u64 = 0xFE;
 const WHITE_MASK: u64 = !0xFF;
+const NOT_A_FILE: u64 = 0xfefefefefefefefe;
+const NOT_H_FILE: u64 = 0x7f7f7f7f7f7f7f7f;
+const NOT_TOP_ROW: u64 = 0x00ffffffffffffff;
+const NOT_BOTTOM_ROW: u64 = 0xffffffffffffff00;
+const MASK_E: u64 = NOT_H_FILE;
+const MASK_W: u64 = NOT_A_FILE;
+const MASK_N: u64 = NOT_TOP_ROW;
+const MASK_S: u64 = NOT_BOTTOM_ROW;
+const MASK_NE: u64 = NOT_TOP_ROW & NOT_H_FILE;
+const MASK_NW: u64 = NOT_TOP_ROW & NOT_A_FILE;
+const MASK_SE: u64 = NOT_BOTTOM_ROW & NOT_H_FILE;
+const MASK_SW: u64 = NOT_BOTTOM_ROW & NOT_A_FILE;
 
 impl BitBoard {
     /// 初期盤面を生成
@@ -440,6 +452,28 @@ pub enum GameState {
 /// assert_ne!(moves, 0); // 初期盤面には合法手が存在
 /// assert_eq!(moves.count_ones(), 4); // 初期盤面には4つの合法手
 /// ```
+#[inline(always)]
+fn line_moves_positive(player: u64, mask: u64, shift: u32) -> u64 {
+    let mut candidates = mask & (player << shift);
+    candidates |= mask & (candidates << shift);
+    candidates |= mask & (candidates << shift);
+    candidates |= mask & (candidates << shift);
+    candidates |= mask & (candidates << shift);
+    candidates |= mask & (candidates << shift);
+    candidates << shift
+}
+
+#[inline(always)]
+fn line_moves_negative(player: u64, mask: u64, shift: u32) -> u64 {
+    let mut candidates = mask & (player >> shift);
+    candidates |= mask & (candidates >> shift);
+    candidates |= mask & (candidates >> shift);
+    candidates |= mask & (candidates >> shift);
+    candidates |= mask & (candidates >> shift);
+    candidates |= mask & (candidates >> shift);
+    candidates >> shift
+}
+
 #[inline]
 pub fn legal_moves(board: &BitBoard) -> u64 {
     let player = board.current_player();
@@ -447,57 +481,57 @@ pub fn legal_moves(board: &BitBoard) -> u64 {
     let empty = !(player | opponent);
 
     let mut moves = 0u64;
-
-    // 8方向それぞれについて処理
-    // ループアンローリングは不要（コンパイラが最適化）
-    for &dir in &DIRECTIONS {
-        // 現在のプレイヤーの石から指定方向に1マスシフトし、相手の石と重なる位置を検出
-        let mut candidates = shift(player, dir) & opponent;
-
-        // 相手の石が連続する範囲を追跡
-        // ARM64: candidates != 0 はCCMP命令で最適化される
-        while candidates != 0 {
-            let next = shift(candidates, dir);
-            // 空マスに到達したら、それが合法手
-            moves |= next & empty;
-            // 相手の石が続く場合のみ継続
-            candidates = next & opponent;
-        }
-    }
-
+    moves |= empty & line_moves_positive(player, opponent & MASK_E, 1);
+    moves |= empty & line_moves_negative(player, opponent & MASK_W, 1);
+    moves |= empty & line_moves_positive(player, opponent & MASK_N, 8);
+    moves |= empty & line_moves_negative(player, opponent & MASK_S, 8);
+    moves |= empty & line_moves_positive(player, opponent & MASK_NE, 9);
+    moves |= empty & line_moves_negative(player, opponent & MASK_SW, 9);
+    moves |= empty & line_moves_positive(player, opponent & MASK_NW, 7);
+    moves |= empty & line_moves_negative(player, opponent & MASK_SE, 7);
     moves
 }
 
-/// 指定方向で反転される石を検出
-///
-/// 着手位置から指定方向に走査し、挟まれる相手の石をビットマスクで返す。
-///
-/// # Arguments
-///
-/// * `board` - 現在の盤面状態
-/// * `pos` - 着手位置（0-63）
-/// * `dir` - 走査方向（DIRECTIONS配列の値）
-///
-/// # Returns
-///
-/// 反転される石のビットマスク。挟めない場合は0。
-#[inline]
-fn find_flipped_in_direction(board: &BitBoard, pos: u8, dir: i32) -> u64 {
-    let player = board.current_player();
-    let opponent = board.opponent();
-
-    // 着手位置から指定方向に1マスずつ進む
-    let mut current = shift(1u64 << pos, dir);
-    let mut flipped = 0u64;
-
-    // 相手の石が続く限り追跡
-    while (current & opponent) != 0 {
-        flipped |= current;
-        current = shift(current, dir);
+#[inline(always)]
+fn line_flips_positive(move_bit: u64, player: u64, mask: u64, shift: u32) -> u64 {
+    let mut captured = mask & (move_bit << shift);
+    captured |= mask & (captured << shift);
+    captured |= mask & (captured << shift);
+    captured |= mask & (captured << shift);
+    captured |= mask & (captured << shift);
+    captured |= mask & (captured << shift);
+    if ((captured << shift) & player) != 0 {
+        captured
+    } else {
+        0
     }
+}
 
-    // 最後に自分の石に到達した場合のみ反転が有効
-    if (current & player) != 0 { flipped } else { 0 }
+#[inline(always)]
+fn line_flips_negative(move_bit: u64, player: u64, mask: u64, shift: u32) -> u64 {
+    let mut captured = mask & (move_bit >> shift);
+    captured |= mask & (captured >> shift);
+    captured |= mask & (captured >> shift);
+    captured |= mask & (captured >> shift);
+    captured |= mask & (captured >> shift);
+    captured |= mask & (captured >> shift);
+    if ((captured >> shift) & player) != 0 {
+        captured
+    } else {
+        0
+    }
+}
+
+#[inline(always)]
+fn compute_flips(player: u64, opponent: u64, move_bit: u64) -> u64 {
+    line_flips_positive(move_bit, player, opponent & MASK_E, 1)
+        | line_flips_negative(move_bit, player, opponent & MASK_W, 1)
+        | line_flips_positive(move_bit, player, opponent & MASK_N, 8)
+        | line_flips_negative(move_bit, player, opponent & MASK_S, 8)
+        | line_flips_positive(move_bit, player, opponent & MASK_NE, 9)
+        | line_flips_negative(move_bit, player, opponent & MASK_SW, 9)
+        | line_flips_positive(move_bit, player, opponent & MASK_NW, 7)
+        | line_flips_negative(move_bit, player, opponent & MASK_SE, 7)
 }
 
 /// 着手を実行し、石を反転する
@@ -535,18 +569,31 @@ fn find_flipped_in_direction(board: &BitBoard, pos: u8, dir: i32) -> u64 {
 /// let undo_info = make_move(&mut board, first_move).unwrap();
 /// ```
 pub fn make_move(board: &mut BitBoard, pos: u8) -> Result<UndoInfo, GameError> {
-    // 範囲チェック
     if pos >= 64 {
         return Err(GameError::OutOfBounds(pos));
     }
 
-    // 合法手チェック
     let legal = legal_moves(board);
     if legal & (1 << pos) == 0 {
         return Err(GameError::IllegalMove(pos));
     }
 
-    // Undo情報を保存
+    Ok(apply_move_unchecked(board, pos))
+}
+
+/// 合法性チェックを省略した高速版 make_move
+#[inline]
+pub fn make_move_unchecked(board: &mut BitBoard, pos: u8) -> UndoInfo {
+    debug_assert!(pos < 64, "position must be within board bounds");
+    debug_assert!(
+        (legal_moves(board) & (1u64 << pos)) != 0,
+        "make_move_unchecked requires a legal move"
+    );
+    apply_move_unchecked(board, pos)
+}
+
+#[inline(always)]
+fn apply_move_unchecked(board: &mut BitBoard, pos: u8) -> UndoInfo {
     let mut undo = UndoInfo {
         black: board.black,
         white_mask: board.white_mask(),
@@ -556,45 +603,34 @@ pub fn make_move(board: &mut BitBoard, pos: u8) -> Result<UndoInfo, GameError> {
         flipped: 0,
     };
 
-    // 8方向で反転される石を検出
-    let mut all_flipped = 0u64;
-    for &dir in &DIRECTIONS {
-        all_flipped |= find_flipped_in_direction(board, pos, dir);
-    }
+    let player_bits = board.current_player();
+    let opponent_bits = board.opponent();
+    let move_bit = 1u64 << pos;
+    let all_flipped = compute_flips(player_bits, opponent_bits, move_bit);
+    debug_assert!(all_flipped != 0, "legal move must flip at least one disc");
 
     undo.flipped = all_flipped;
 
-    // メタデータを事前に保存
     let old_metadata = board.white & (TURN_MASK | MOVE_COUNT_MASK);
 
-    // 現在の手番に応じて石を配置・反転
     let turn = board.turn();
     if turn == Color::Black {
-        // 黒石を配置
-        board.black |= 1u64 << pos;
-        // 反転した石を黒に
+        board.black |= move_bit;
         board.black |= all_flipped;
-        // 白から除去（メタデータを保持）
         board.white = (board.white & !all_flipped & WHITE_MASK) | old_metadata;
     } else {
-        // 白石を配置
-        let white_stones = board.white_mask() | (1u64 << pos);
-        // 反転した石も白に
+        let white_stones = board.white_mask() | move_bit;
         board.white = (white_stones | all_flipped) & WHITE_MASK;
-        // 黒から除去
         board.black &= !all_flipped;
-        // メタデータを復元
         board.white |= old_metadata;
     }
 
-    // 手番を切り替え
     board.white ^= TURN_MASK;
 
-    // 手数を増加
     let new_move_count = board.move_count() + 1;
     board.white = (board.white & !MOVE_COUNT_MASK) | ((new_move_count as u64) << 1);
 
-    Ok(undo)
+    undo
 }
 
 /// 着手を取り消し、元の状態に復元する
