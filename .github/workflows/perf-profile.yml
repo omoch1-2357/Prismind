@@ -4,8 +4,10 @@ name: Perf Profiling (Linux)
 # Measures cache miss rate and branch prediction miss rate on Linux (x86_64 and ARM64)
 
 on:
-  # Run on pull requests to phase2-search branch
+  push:
+    branches: [main]
   pull_request:
+    branches: [main]
   # Allow manual trigger
   workflow_dispatch:
   # Run weekly to track performance trends

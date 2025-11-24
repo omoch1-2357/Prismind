@@ -2,7 +2,10 @@ name: ARM64 Performance Benchmarks
 
 # Run on PRs to measure ARM64-specific optimizations
 on:
+  push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch: # Allow manual trigger
 
 permissions:
