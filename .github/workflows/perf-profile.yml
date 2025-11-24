@@ -63,14 +63,21 @@ jobs:
           echo 0 | sudo tee /proc/sys/kernel/kptr_restrict
 
       - name: Build benchmarks
-        run: |
-          cargo build --release --benches
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: cargo build --release --benches
 
       - name: Run perf profiling (x86_64)
-        run: |
-          # The script uses: perf stat -e cache-references,cache-misses,branches,branch-misses,instructions,cycles
-          chmod +x scripts/perf_profile.sh
-          ./scripts/perf_profile.sh 2>&1 | tee perf_x86_64.log
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          command: |
+            # The script uses: perf stat -e cache-references,cache-misses,branches,branch-misses,instructions,cycles
+            chmod +x scripts/perf_profile.sh
+            ./scripts/perf_profile.sh 2>&1 | tee perf_x86_64.log
 
       - name: Extract performance metrics
         id: extract_metrics_x86
@@ -172,13 +179,20 @@ jobs:
           echo 0 | sudo tee /proc/sys/kernel/kptr_restrict
 
       - name: Build benchmarks
-        run: |
-          cargo build --release --benches
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: cargo build --release --benches
 
       - name: Run perf profiling (ARM64)
-        run: |
-          chmod +x scripts/perf_profile.sh
-          ./scripts/perf_profile.sh 2>&1 | tee perf_arm64.log
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          command: |
+            chmod +x scripts/perf_profile.sh
+            ./scripts/perf_profile.sh 2>&1 | tee perf_arm64.log
 
       - name: Extract performance metrics
         id: extract_metrics_arm

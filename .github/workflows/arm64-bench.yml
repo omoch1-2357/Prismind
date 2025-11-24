@@ -50,26 +50,38 @@ jobs:
       # Task 14.1.1: legal_moves() benchmark
       # Target: 500ns average, measure mean/stddev/p99
       - name: Benchmark legal_moves() - 1000 iterations
-        run: |
-          echo "::group::legal_moves() Benchmark"
-          cargo bench --bench legal_moves_bench -- legal_moves_1000_iters --verbose 2>&1 | tee bench_legal_moves.log
-          echo "::endgroup::"
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: |
+            echo "::group::legal_moves() Benchmark"
+            cargo bench --bench legal_moves_bench -- legal_moves_1000_iters --verbose 2>&1 | tee bench_legal_moves.log
+            echo "::endgroup::"
 
       # Task 14.1.2: make_move() benchmark
       # Target: 1.5μs average, measure mean/stddev/p99
       - name: Benchmark make_move() - 1000 iterations
-        run: |
-          echo "::group::make_move() Benchmark"
-          cargo bench --bench make_move_bench -- make_move_1000_iters --verbose 2>&1 | tee bench_make_move.log
-          echo "::endgroup::"
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: |
+            echo "::group::make_move() Benchmark"
+            cargo bench --bench make_move_bench -- make_move_1000_iters --verbose 2>&1 | tee bench_make_move.log
+            echo "::endgroup::"
 
       # Task 14.1.3: rotate_180() benchmark
       # Target: 200ns average (ARM64 REV instruction effect), measure mean/stddev/p99
       - name: Benchmark rotate_180() - 1000 iterations
-        run: |
-          echo "::group::rotate_180() Benchmark"
-          cargo bench --bench rotation_bench -- rotate_180_1000_iters --verbose 2>&1 | tee bench_rotate_180.log
-          echo "::endgroup::"
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: |
+            echo "::group::rotate_180() Benchmark"
+            cargo bench --bench rotation_bench -- rotate_180_1000_iters --verbose 2>&1 | tee bench_rotate_180.log
+            echo "::endgroup::"
 
       # Generate comprehensive benchmark report
       - name: Generate benchmark summary
@@ -265,18 +277,26 @@ jobs:
       # Task 14.2.1: extract_all_patterns() benchmark
       # Target: 25μs average, measure mean/stddev/p99
       - name: Benchmark extract_all_patterns() - 1000 iterations
-        run: |
-          echo "::group::extract_all_patterns() Benchmark"
-          cargo bench --bench extract_patterns_bench -- extract_all_patterns_1000_iters --verbose 2>&1 | tee bench_extract_patterns.log
-          echo "::endgroup::"
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: |
+            echo "::group::extract_all_patterns() Benchmark"
+            cargo bench --bench extract_patterns_bench -- extract_all_patterns_1000_iters --verbose 2>&1 | tee bench_extract_patterns.log
+            echo "::endgroup::"
 
       # Task 14.2.2: evaluate() benchmark
       # Target: 35μs average (プリフェッチとSoA最適化), measure mean/stddev/p99
       - name: Benchmark evaluate() - 1000 iterations
-        run: |
-          echo "::group::evaluate() Benchmark"
-          cargo bench --bench evaluate_bench -- evaluate_1000_iters --verbose 2>&1 | tee bench_evaluate.log
-          echo "::endgroup::"
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: |
+            echo "::group::evaluate() Benchmark"
+            cargo bench --bench evaluate_bench -- evaluate_1000_iters --verbose 2>&1 | tee bench_evaluate.log
+            echo "::endgroup::"
 
       # Generate comprehensive benchmark report
       - name: Generate evaluation system benchmark summary
@@ -461,10 +481,14 @@ jobs:
           rustc --version --verbose | grep host
 
       - name: Run core benchmarks (x86-64)
-        run: |
-          cargo bench --bench legal_moves_bench -- legal_moves_1000_iters --verbose
-          cargo bench --bench make_move_bench -- make_move_1000_iters --verbose
-          cargo bench --bench rotation_bench -- rotate_180_1000_iters --verbose
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          command: |
+            cargo bench --bench legal_moves_bench -- legal_moves_1000_iters --verbose
+            cargo bench --bench make_move_bench -- make_move_1000_iters --verbose
+            cargo bench --bench rotation_bench -- rotate_180_1000_iters --verbose
 
       - name: Upload x86-64 benchmark results
         uses: actions/upload-artifact@v5
