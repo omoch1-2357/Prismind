@@ -3402,10 +3402,26 @@ mod tests {
 
         let mut board = BitBoard::new();
         let mut move_count = 0;
-        while move_count < 46 {
+
+        // 空きマス数が14以下になるまで進める
+        loop {
+            let occupied = board.black | board.white_mask();
+            let empty_count = 64 - occupied.count_ones();
+
+            if empty_count <= 14 {
+                break;
+            }
+
             let moves = legal_moves(&board);
             if moves == 0 {
-                break;
+                // パスの場合は手番を反転（move_countは増やさない）
+                board = board.flip();
+                let moves_after_pass = legal_moves(&board);
+                if moves_after_pass == 0 {
+                    // 両者パス = ゲーム終了
+                    break;
+                }
+                continue;
             }
 
             let legal_moves_vec: Vec<u8> =
@@ -3416,7 +3432,17 @@ mod tests {
             move_count += 1;
         }
 
-        if move_count >= 46 {
+        // 盤面の空きマス数を確認
+        let occupied = board.black | board.white_mask();
+        let empty_count = 64 - occupied.count_ones();
+
+        println!("Board state before search:");
+        println!("  Move count: {}", move_count);
+        println!("  Empty squares: {}", empty_count);
+        println!("  Black stones: {}", board.black.count_ones());
+        println!("  White stones: {}", board.white_mask().count_ones());
+
+        if empty_count <= 14 {
             let result = search.search(&board, 100, Some(20));
             assert!(result.is_ok(), "Search should succeed in endgame mode");
 
@@ -3429,10 +3455,21 @@ mod tests {
             println!("  TT hits: {}", search_result.tt_hits);
             println!("  TT hit rate: {:.1}%", search_result.tt_hit_rate() * 100.0);
 
+            // 終盤モードでは depth == empty_count であることを確認
+            assert_eq!(
+                search_result.depth, empty_count as u8,
+                "In endgame mode, depth should equal empty_count"
+            );
+
             assert!(
                 search_result.elapsed_ms <= 150,
                 "Endgame search should complete within extended time limit: actual {}ms > 150ms target",
                 search_result.elapsed_ms
+            );
+        } else {
+            println!(
+                "Warning: Did not reach endgame mode. Empty squares: {}",
+                empty_count
             );
         }
     }
