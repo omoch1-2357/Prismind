@@ -6,12 +6,6 @@ name: Perf Profiling (Linux)
 on:
   # Run on pull requests to phase2-search branch
   pull_request:
-    branches: [phase2-search, main]
-    paths:
-      - 'src/search/**'
-      - 'benches/search_bench.rs'
-      - 'scripts/perf_profile.sh'
-      - '.github/workflows/perf-profile.yml'
   # Allow manual trigger
   workflow_dispatch:
   # Run weekly to track performance trends

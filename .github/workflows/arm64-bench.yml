@@ -3,12 +3,6 @@ name: ARM64 Performance Benchmarks
 # Run on PRs to measure ARM64-specific optimizations
 on:
   pull_request:
-    branches: [main, phase1-foundation]
-    paths:
-      - 'src/**'
-      - 'benches/**'
-      - 'Cargo.toml'
-      - '.github/workflows/arm64-bench.yml'
   workflow_dispatch: # Allow manual trigger
 
 permissions:
