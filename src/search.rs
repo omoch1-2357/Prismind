@@ -302,8 +302,10 @@ pub struct TTEntry {
     pub best_move: u8,
     /// 世代情報
     pub age: u8,
+    /// 有効フラグ（0なら空きスロット）
+    valid: u8,
     /// パディング（64バイトアライメント用）
-    _padding: [u8; 50],
+    _padding: [u8; 49],
 }
 
 impl TTEntry {
@@ -317,8 +319,28 @@ impl TTEntry {
             score,
             best_move,
             age,
-            _padding: [0; 50],
+            valid: 1,
+            _padding: [0; 49],
         }
+    }
+
+    #[inline]
+    pub const fn empty() -> Self {
+        Self {
+            hash: 0,
+            depth: 0,
+            bound: Bound::Exact,
+            score: 0,
+            best_move: 255,
+            age: 0,
+            valid: 0,
+            _padding: [0; 49],
+        }
+    }
+
+    #[inline]
+    pub fn is_valid(&self) -> bool {
+        self.valid != 0
     }
 }
 
@@ -327,7 +349,7 @@ impl TTEntry {
 /// 評価済み局面を保存・検索し、探索を高速化する。
 pub struct TranspositionTable {
     /// エントリ配列
-    entries: Vec<Option<TTEntry>>,
+    entries: Vec<TTEntry>,
     /// テーブルサイズ
     size: usize,
     /// 現在の世代
@@ -350,13 +372,13 @@ impl TranspositionTable {
             )));
         }
 
-        const ENTRY_SIZE: usize = std::mem::size_of::<Option<TTEntry>>();
+        const ENTRY_SIZE: usize = std::mem::size_of::<TTEntry>();
         let num_entries = (size_mb * 1024 * 1024) / ENTRY_SIZE;
 
         // 2の累乗に丸める（ビットマスク最適化のため）
         let size = num_entries.next_power_of_two();
 
-        let entries = vec![None; size];
+        let entries = vec![TTEntry::empty(); size];
 
         Ok(Self {
             entries,
@@ -374,15 +396,13 @@ impl TranspositionTable {
     /// `Option<TTEntry>` - ヒット時はエントリ、ミス時はNone
     pub fn probe(&self, hash: u64) -> Option<TTEntry> {
         let index = (hash as usize) & (self.size - 1);
+        let entry = self.entries[index];
 
-        if let Some(entry) = self.entries[index] {
-            // hash値の完全一致確認（衝突検出）
-            if entry.hash == hash {
-                return Some(entry);
-            }
+        if entry.is_valid() && entry.hash == hash {
+            Some(entry)
+        } else {
+            None
         }
-
-        None
     }
 
     /// 局面を保存
@@ -394,21 +414,16 @@ impl TranspositionTable {
         let index = (hash as usize) & (self.size - 1);
 
         // 置換戦略: 深さ優先 + 世代管理
-        let should_replace = if let Some(existing) = self.entries[index] {
-            // 異なる世代なら置換
-            if existing.age != self.current_age {
-                true
-            } else {
-                // 同じ世代なら深さで判定
-                entry.depth >= existing.depth
-            }
-        } else {
-            // 空エントリなら保存
+        let existing = self.entries[index];
+
+        let should_replace = if !existing.is_valid() || existing.age != self.current_age {
             true
+        } else {
+            entry.depth >= existing.depth
         };
 
         if should_replace {
-            self.entries[index] = Some(entry);
+            self.entries[index] = entry;
         }
     }
 
@@ -677,6 +692,7 @@ pub fn order_moves_branchless(moves: u64, tt_best_move: Option<u8>) -> ([u8; 32]
 /// * `depth` - 残り探索深さ
 /// * `alpha` - 下限（これ以上の評価値を期待）
 /// * `beta` - 上限（これ以上なら枝刈り）
+/// * `hash` - 現在の盤面のZobristハッシュ値
 /// * `ctx` - 探索コンテキスト（評価関数、置換表、統計）
 ///
 /// # Returns
@@ -710,20 +726,21 @@ pub fn order_moves_branchless(moves: u64, tt_best_move: Option<u8>) -> ([u8; 32]
 /// let mut stats = SearchStats::new();
 /// let mut ctx = SearchContext { evaluator: &evaluator, tt: &mut tt, zobrist: &zobrist, stats: &mut stats };
 ///
-/// let (score, best_move) = alpha_beta(&mut board, 3, -10000, 10000, &mut ctx);
+/// let hash = zobrist.hash(&board);
+/// let (score, best_move) = alpha_beta(&mut board, 3, -10000, 10000, hash, &mut ctx);
 /// ```
 pub fn alpha_beta(
     board: &mut BitBoard,
     depth: i32,
     mut alpha: i32,
     beta: i32,
+    hash: u64,
     ctx: &mut SearchContext,
 ) -> (f32, Option<u8>) {
     // ノード数をカウント
     ctx.stats.nodes += 1;
 
     // 置換表をプローブ
-    let hash = ctx.zobrist.hash(board);
     if let Some(entry) = ctx.tt.probe(hash) {
         // 深さが十分なら置換表の評価値を使用
         if entry.depth >= depth as i8 {
@@ -796,7 +813,9 @@ pub fn alpha_beta(
         GameState::Pass => {
             // パス状態の際、盤面を反転して相手番として探索を継続
             let mut flipped_board = board.flip();
-            let (score, _) = alpha_beta(&mut flipped_board, depth, -beta, -alpha, ctx);
+            let flipped_hash = ctx.zobrist.hash(&flipped_board);
+            let (score, _) =
+                alpha_beta(&mut flipped_board, depth, -beta, -alpha, flipped_hash, ctx);
             // 符号反転（Negamaxの原則）
             let negated_score = -score;
             // 置換表に保存
@@ -848,9 +867,13 @@ pub fn alpha_beta(
         let pos = *pos;
         // 着手を実行
         let undo_info = make_move_unchecked(board, pos);
+        let is_black_move = undo_info.turn == crate::board::Color::Black;
+        let child_hash = ctx
+            .zobrist
+            .update_hash(hash, pos, undo_info.flipped, is_black_move);
 
         // 再帰的に探索（符号反転でNegamaxの原則を適用）
-        let (score, _) = alpha_beta(board, depth - 1, -beta, -alpha, ctx);
+        let (score, _) = alpha_beta(board, depth - 1, -beta, -alpha, child_hash, ctx);
         let negamax_score = -score;
 
         // 着手を取り消し
@@ -1159,6 +1182,7 @@ pub fn mtdf(
     let mut lower_bound = i32::MIN;
     let mut upper_bound = i32::MAX;
     let mut best_move = None;
+    let root_hash = ctx.zobrist.hash(board);
 
     // 収束するまで繰り返す（通常2-3パス、最悪5-15パス）
     // 無限ループ防止のため、最大パス数を設定
@@ -1172,7 +1196,7 @@ pub fn mtdf(
         let beta = if g == lower_bound { g + 1 } else { g };
 
         // ゼロ幅探索: alpha = beta - 1
-        let (score, current_move) = alpha_beta(board, depth, beta - 1, beta, ctx);
+        let (score, current_move) = alpha_beta(board, depth, beta - 1, beta, root_hash, ctx);
         let g_int = score as i32;
 
         // 最善手を更新
@@ -1460,7 +1484,8 @@ impl Search {
                     stats: &mut prep_stats,
                 };
                 // 深さ6の探索でmove orderingを改善
-                alpha_beta(&mut board_copy, 6, -10000, 10000, &mut prep_ctx);
+                let prep_hash = self.zobrist.hash(&board_copy);
+                alpha_beta(&mut board_copy, 6, -10000, 10000, prep_hash, &mut prep_ctx);
             }
 
             // 完全読みモード
@@ -1509,6 +1534,17 @@ mod tests {
     use super::*;
     use crate::board::{BitBoard, legal_moves, make_move};
     use crate::evaluator::Evaluator;
+
+    fn run_alpha_beta(
+        board: &mut BitBoard,
+        depth: i32,
+        alpha: i32,
+        beta: i32,
+        ctx: &mut SearchContext<'_>,
+    ) -> (f32, Option<u8>) {
+        let hash = ctx.zobrist.hash(board);
+        alpha_beta(board, depth, alpha, beta, hash, ctx)
+    }
 
     #[test]
     fn test_zobrist_deterministic() {
@@ -1928,7 +1964,7 @@ mod tests {
         let beta = 10000;
 
         // AlphaBeta探索を実行
-        let (score, best_move) = alpha_beta(&mut board, 1, alpha, beta, &mut ctx);
+        let (score, best_move) = run_alpha_beta(&mut board, 1, alpha, beta, &mut ctx);
 
         // 基本的な動作確認
         assert!(best_move.is_some(), "Should return a best move");
@@ -1963,7 +1999,7 @@ mod tests {
         let alpha = -100;
         let beta = -50;
 
-        let (score, _) = alpha_beta(&mut board, 2, alpha, beta, &mut ctx);
+        let (score, _) = run_alpha_beta(&mut board, 2, alpha, beta, &mut ctx);
 
         // beta cut発生時はbeta値以上を返す（fail-soft）
         println!("Score with narrow window: {}", score);
@@ -1997,7 +2033,7 @@ mod tests {
         let alpha = -10000;
         let beta = 10000;
 
-        let (score_wide, _) = alpha_beta(&mut board, 1, alpha, beta, &mut ctx);
+        let (score_wide, _) = run_alpha_beta(&mut board, 1, alpha, beta, &mut ctx);
 
         // fail-softでは正確な評価値を返す
         println!("Score with wide window: {}", score_wide);
@@ -2035,7 +2071,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats,
         };
-        let (score_ab, move_ab) = alpha_beta(&mut board_ab, 1, -10000, 10000, &mut ctx);
+        let (score_ab, move_ab) = run_alpha_beta(&mut board_ab, 1, -10000, 10000, &mut ctx);
 
         // 同じ最善手を返すことを確認
         assert_eq!(
@@ -2073,7 +2109,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats1,
         };
-        let (score1, move1) = alpha_beta(&mut board, 2, -10000, 10000, &mut ctx1);
+        let (score1, move1) = run_alpha_beta(&mut board, 2, -10000, 10000, &mut ctx1);
 
         // 同じ盤面で再度探索（置換表ヒットを期待）
         let mut board2 = BitBoard::new();
@@ -2084,7 +2120,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats2,
         };
-        let (score2, move2) = alpha_beta(&mut board2, 2, -10000, 10000, &mut ctx2);
+        let (score2, move2) = run_alpha_beta(&mut board2, 2, -10000, 10000, &mut ctx2);
 
         // 置換表ヒットが発生していることを確認
         assert!(
@@ -2127,7 +2163,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats,
         };
-        alpha_beta(&mut board_ab, 3, -10000, 10000, &mut ctx);
+        run_alpha_beta(&mut board_ab, 3, -10000, 10000, &mut ctx);
 
         // AlphaBetaはNegamaxよりノード数が少ないことを確認
         println!(
@@ -2172,7 +2208,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats,
         };
-        alpha_beta(&mut board, 2, -10000, 10000, &mut ctx);
+        run_alpha_beta(&mut board, 2, -10000, 10000, &mut ctx);
 
         // 探索後は置換表にエントリが保存されている
         let entry = ctx.tt.probe(hash);
@@ -2359,7 +2395,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats1,
         };
-        let (score1, move1) = alpha_beta(&mut board1, 3, -10000, 10000, &mut ctx1);
+        let (score1, move1) = run_alpha_beta(&mut board1, 3, -10000, 10000, &mut ctx1);
 
         // ムーブオーダリングあり（新実装）
         // 注: 実装後は同じalpha_beta関数がorder_movesを内部で呼び出す
@@ -2372,7 +2408,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats2,
         };
-        let (score2, move2) = alpha_beta(&mut board2, 3, -10000, 10000, &mut ctx2);
+        let (score2, move2) = run_alpha_beta(&mut board2, 3, -10000, 10000, &mut ctx2);
 
         // 同じ最善手と評価値を返すことを確認
         assert_eq!(move1, move2, "Move ordering should not change best move");
@@ -2411,7 +2447,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats,
         };
-        alpha_beta(&mut board_test, depth, -10000, 10000, &mut ctx);
+        run_alpha_beta(&mut board_test, depth, -10000, 10000, &mut ctx);
 
         // ムーブオーダリングなしの場合と比較するため、
         // ここではノード数が合理的な範囲内であることのみ確認
@@ -2446,7 +2482,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats1,
         };
-        let (_, best_move1) = alpha_beta(&mut board, 2, -10000, 10000, &mut ctx1);
+        let (_, best_move1) = run_alpha_beta(&mut board, 2, -10000, 10000, &mut ctx1);
 
         // 2回目の探索で置換表最善手が優先評価されることを確認
         // （内部的にorder_movesが置換表最善手を先頭に配置）
@@ -2458,7 +2494,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats2,
         };
-        let (_, best_move2) = alpha_beta(&mut board2, 2, -10000, 10000, &mut ctx2);
+        let (_, best_move2) = run_alpha_beta(&mut board2, 2, -10000, 10000, &mut ctx2);
 
         // 同じ最善手を返すことを確認
         assert_eq!(best_move1, best_move2, "TT best move should be prioritized");
@@ -2567,7 +2603,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats_ab,
         };
-        let (score_ab, move_ab) = alpha_beta(&mut board_ab, 3, -10000, 10000, &mut ctx_ab);
+        let (score_ab, move_ab) = run_alpha_beta(&mut board_ab, 3, -10000, 10000, &mut ctx_ab);
 
         // MTD(f)探索
         let mut board_mtdf = board;
@@ -2620,7 +2656,7 @@ mod tests {
             zobrist: &zobrist,
             stats: &mut stats_ab,
         };
-        alpha_beta(&mut board_ab, 4, -10000, 10000, &mut ctx_ab);
+        run_alpha_beta(&mut board_ab, 4, -10000, 10000, &mut ctx_ab);
 
         // MTD(f)探索のノード数（良い初期推測値を使用）
         let mut board_mtdf = board;
@@ -3466,10 +3502,12 @@ mod tests {
                 "In endgame mode, depth should equal empty_count"
             );
 
+            const ENDGAME_TIME_BUDGET_MS: u64 = 150;
             assert!(
-                search_result.elapsed_ms <= 150,
-                "Endgame search should complete within extended time limit: actual {}ms > 150ms target",
-                search_result.elapsed_ms
+                search_result.elapsed_ms <= ENDGAME_TIME_BUDGET_MS,
+                "Endgame search should complete within extended time limit: actual {}ms > {}ms target",
+                search_result.elapsed_ms,
+                ENDGAME_TIME_BUDGET_MS
             );
         } else {
             println!(

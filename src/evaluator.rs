@@ -414,8 +414,9 @@ impl Evaluator {
         // ステージを手数÷2で計算
         let stage = calculate_stage(board.move_count());
 
-        // 56個のパターンインスタンスを抽出
-        let indices = crate::pattern::extract_all_patterns(board, &self.patterns);
+        // 56個のパターンインスタンスを抽出（固定長バッファに書き込み）
+        let mut indices = [0usize; 56];
+        crate::pattern::extract_all_patterns_into(board, &self.patterns, &mut indices);
 
         let mut sum = 0.0f32;
 

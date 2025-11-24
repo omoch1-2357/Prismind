@@ -483,12 +483,12 @@ pub fn legal_moves(board: &BitBoard) -> u64 {
     let mut moves = 0u64;
     moves |= empty & line_moves_positive(player, opponent & MASK_E, 1);
     moves |= empty & line_moves_negative(player, opponent & MASK_W, 1);
-    moves |= empty & line_moves_positive(player, opponent & MASK_N, 8);
-    moves |= empty & line_moves_negative(player, opponent & MASK_S, 8);
-    moves |= empty & line_moves_positive(player, opponent & MASK_NE, 9);
-    moves |= empty & line_moves_negative(player, opponent & MASK_SW, 9);
-    moves |= empty & line_moves_positive(player, opponent & MASK_NW, 7);
-    moves |= empty & line_moves_negative(player, opponent & MASK_SE, 7);
+    moves |= empty & line_moves_negative(player, opponent & MASK_N, 8);
+    moves |= empty & line_moves_positive(player, opponent & MASK_S, 8);
+    moves |= empty & line_moves_negative(player, opponent & MASK_NE, 7);
+    moves |= empty & line_moves_positive(player, opponent & MASK_SW, 7);
+    moves |= empty & line_moves_negative(player, opponent & MASK_NW, 9);
+    moves |= empty & line_moves_positive(player, opponent & MASK_SE, 9);
     moves
 }
 
@@ -526,12 +526,12 @@ fn line_flips_negative(move_bit: u64, player: u64, mask: u64, shift: u32) -> u64
 fn compute_flips(player: u64, opponent: u64, move_bit: u64) -> u64 {
     line_flips_positive(move_bit, player, opponent & MASK_E, 1)
         | line_flips_negative(move_bit, player, opponent & MASK_W, 1)
-        | line_flips_positive(move_bit, player, opponent & MASK_N, 8)
-        | line_flips_negative(move_bit, player, opponent & MASK_S, 8)
-        | line_flips_positive(move_bit, player, opponent & MASK_NE, 9)
-        | line_flips_negative(move_bit, player, opponent & MASK_SW, 9)
-        | line_flips_positive(move_bit, player, opponent & MASK_NW, 7)
-        | line_flips_negative(move_bit, player, opponent & MASK_SE, 7)
+        | line_flips_negative(move_bit, player, opponent & MASK_N, 8)
+        | line_flips_positive(move_bit, player, opponent & MASK_S, 8)
+        | line_flips_negative(move_bit, player, opponent & MASK_NE, 7)
+        | line_flips_positive(move_bit, player, opponent & MASK_SW, 7)
+        | line_flips_negative(move_bit, player, opponent & MASK_NW, 9)
+        | line_flips_positive(move_bit, player, opponent & MASK_SE, 9)
 }
 
 /// 着手を実行し、石を反転する
