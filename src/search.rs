@@ -666,78 +666,6 @@ pub fn order_moves_branchless(moves: u64, tt_best_move: Option<u8>) -> ([u8; 32]
     (move_list, count)
 }
 
-/// 合法手を優先順位付けしてソート
-///
-/// # Arguments
-/// * `moves` - 合法手のビットマスク
-/// * `tt_best_move` - 置換表の最善手（`Option<u8>`）
-///
-/// # Returns
-/// `Vec<u8>` - 優先順位順の合法手リスト
-///
-/// # 優先順位
-/// 1. 置換表最善手（TT best move）
-/// 2. 角を取る手（Corners: 0, 7, 56, 63）
-/// 3. 辺の手（Edges: row/col == 0 or 7, excluding corners）
-/// 4. 内側の手（Center squares）
-/// 5. X打ち（X-squares: corner adjacents）
-///
-/// # Preconditions
-/// * `moves`は合法手のビットマスク（0なら空のVecを返す）
-///
-/// # Postconditions
-/// * 返却リストは合法手のみ含む
-/// * 置換表最善手が先頭（存在する場合）
-pub fn order_moves(moves: u64, tt_best_move: Option<u8>) -> ([u8; 32], usize) {
-    let mut move_list = [0u8; 32];
-    let mut count = 0;
-
-    // 合法手を配列に追加
-    let mut move_bits = moves;
-    while move_bits != 0 {
-        let pos = move_bits.trailing_zeros() as u8;
-        move_list[count] = pos;
-        count += 1;
-        move_bits &= move_bits - 1;
-    }
-
-    // 優先順位付け関数
-    let priority = |pos: u8| -> i32 {
-        // TT最善手の判定
-        let tt_bonus = if let Some(tt_move) = tt_best_move {
-            if pos == tt_move { 1000 } else { 0 }
-        } else {
-            0
-        };
-
-        // 角: 優先度100
-        let corner_bonus = if is_corner_branchless(pos) { 100 } else { 0 };
-
-        // X打ち: 優先度-60（低優先度）
-        let x_penalty = if is_x_square_branchless(pos) { -60 } else { 0 };
-
-        // 辺: 優先度50
-        let edge_bonus = if is_edge_branchless(pos) { 50 } else { 0 };
-
-        let base_score = 10;
-        tt_bonus + corner_bonus + x_penalty + edge_bonus + base_score
-    };
-
-    // 挿入ソート（小規模配列に効率的）
-    for i in 1..count {
-        let key = move_list[i];
-        let key_priority = priority(key);
-        let mut j = i;
-        while j > 0 && priority(move_list[j - 1]) < key_priority {
-            move_list[j] = move_list[j - 1];
-            j -= 1;
-        }
-        move_list[j] = key;
-    }
-
-    (move_list, count)
-}
-
 /// Alpha-Beta枝刈り探索
 ///
 /// Alpha-Beta枝刈りを使用して探索効率を向上させる。fail-soft実装により
@@ -909,7 +837,7 @@ pub fn alpha_beta(
     };
 
     // ムーブオーダリング: 合法手を優先順位付けしてソート
-    let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
+    let (ordered_moves, move_count) = order_moves_branchless(moves, tt_best_move);
 
     // 最善評価値と最善手を初期化
     let mut best_score = f32::NEG_INFINITY;
@@ -1094,7 +1022,7 @@ pub fn complete_search(
             None
         }
     });
-    let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
+    let (ordered_moves, move_count) = order_moves_branchless(moves, tt_best_move);
 
     let mut best_score = alpha as f32;
     let mut best_move = None;
@@ -2262,7 +2190,7 @@ mod tests {
         let moves = (1u64 << 0) | (1u64 << 7) | (1u64 << 19) | (1u64 << 56);
         let tt_best_move = None;
 
-        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves_branchless(moves, tt_best_move);
 
         // 角のマス（0, 7, 56）が上位に来ることを確認
         assert!(move_count == 4, "Should have 4 moves");
@@ -2284,7 +2212,7 @@ mod tests {
         let moves = (1u64 << 1) | (1u64 << 9) | (1u64 << 20) | (1u64 << 30);
         let tt_best_move = None;
 
-        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves_branchless(moves, tt_best_move);
 
         assert!(move_count == 4, "Should have 4 moves");
 
@@ -2306,7 +2234,7 @@ mod tests {
         let moves = (1u64 << 2) | (1u64 << 3) | (1u64 << 20) | (1u64 << 58);
         let tt_best_move = None;
 
-        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves_branchless(moves, tt_best_move);
 
         assert!(move_count == 4, "Should have 4 moves");
 
@@ -2327,7 +2255,7 @@ mod tests {
         let moves = (1u64 << 19) | (1u64 << 20) | (1u64 << 27) | (1u64 << 28);
         let tt_best_move = Some(27);
 
-        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves_branchless(moves, tt_best_move);
 
         assert!(move_count == 4, "Should have 4 moves");
         assert_eq!(
@@ -2344,7 +2272,7 @@ mod tests {
         let moves = (1u64 << 0) | (1u64 << 1) | (1u64 << 19) | (1u64 << 20);
         let tt_best_move = None;
 
-        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves_branchless(moves, tt_best_move);
 
         // Vec<u8>型で返されることを確認
         assert!(move_count == 4, "Should return 4 moves");
@@ -2371,7 +2299,7 @@ mod tests {
         let moves = 0u64;
         let tt_best_move = None;
 
-        let (_, move_count) = order_moves(moves, tt_best_move);
+        let (_, move_count) = order_moves_branchless(moves, tt_best_move);
 
         assert_eq!(move_count, 0, "Empty moves should return move_count of 0");
     }
@@ -2387,7 +2315,7 @@ mod tests {
         let moves = (1u64 << 0) | (1u64 << 1) | (1u64 << 3) | (1u64 << 20) | (1u64 << 27);
         let tt_best_move = Some(27);
 
-        let (ordered_moves, move_count) = order_moves(moves, tt_best_move);
+        let (ordered_moves, move_count) = order_moves_branchless(moves, tt_best_move);
 
         assert!(move_count == 5, "Should have 5 moves");
 
@@ -3693,42 +3621,6 @@ mod tests {
         assert!(!is_edge_branchless(7), "Corner 7 is not counted as edge");
         assert!(!is_edge_branchless(20), "Position 20 is not edge");
         assert!(!is_edge_branchless(27), "Position 27 is not edge");
-    }
-
-    #[test]
-    fn test_order_moves_branchless_same_result() {
-        // Requirement 16.3: ブランチレス実装が同じ結果を返すことを確認
-
-        // 様々な合法手パターンでテスト
-        let test_cases = vec![
-            (
-                (1u64 << 0) | (1u64 << 7) | (1u64 << 19) | (1u64 << 56),
-                None,
-            ),
-            (
-                (1u64 << 1) | (1u64 << 9) | (1u64 << 20) | (1u64 << 30),
-                None,
-            ),
-            (
-                (1u64 << 2) | (1u64 << 3) | (1u64 << 20) | (1u64 << 58),
-                Some(20),
-            ),
-            (
-                (1u64 << 0) | (1u64 << 1) | (1u64 << 3) | (1u64 << 20) | (1u64 << 27),
-                Some(27),
-            ),
-        ];
-
-        for (moves, tt_move) in test_cases {
-            let (original_moves, _original_count) = order_moves(moves, tt_move);
-            let (branchless_moves, _branchless_count) = order_moves_branchless(moves, tt_move);
-
-            assert_eq!(
-                original_moves, branchless_moves,
-                "Branchless ordering should match original for moves={:064b}, tt_move={:?}",
-                moves, tt_move
-            );
-        }
     }
 
     #[cfg(target_arch = "aarch64")]
