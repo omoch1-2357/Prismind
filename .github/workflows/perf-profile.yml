@@ -303,16 +303,21 @@ jobs:
 
           EOF
 
+          X86_REPORT=$(find perf-x86-64/perf_results -name "perf_report_*.txt" | head -n1)
+
           # Append x86_64 results if available
-          if [[ -f perf-x86-64/perf_x86_64.log ]]; then
-            echo "### Perf Stat Output" >> performance_comparison.md
+          if [[ -f "$X86_REPORT" ]]; then
+            echo "### Analysis Output" >> performance_comparison.md
             echo '```' >> performance_comparison.md
-            grep -A 20 "Performance Analysis" perf-x86-64/perf_x86_64.log >> performance_comparison.md || echo "No analysis found" >> performance_comparison.md
+            cat "$X86_REPORT" >> performance_comparison.md
             echo '```' >> performance_comparison.md
-            echo "" >> performance_comparison.md
+          elif [[ -f perf-x86-64/perf_x86_64.log ]]; then
+            echo "### Raw Perf Log" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
+            grep -A 20 "Performance counter stats" perf-x86-64/perf_x86_64.log >> performance_comparison.md || echo "Log data not found" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
           else
             echo "*x86_64 results not available*" >> performance_comparison.md
-            echo "" >> performance_comparison.md
           fi
 
           # ARM64 section
@@ -325,15 +330,21 @@ jobs:
 
           EOF
 
-          if [[ -f perf-arm64/perf_arm64.log ]]; then
-            echo "### Perf Stat Output" >> performance_comparison.md
+          ARM_REPORT=$(find perf-arm64/perf_results -name "perf_report_*.txt" | head -n1)
+
+          if [[ -f "$ARM_REPORT" ]]; then
+            echo "### Analysis Output" >> performance_comparison.md
             echo '```' >> performance_comparison.md
-            grep -A 20 "Performance Analysis" perf-arm64/perf_arm64.log >> performance_comparison.md || echo "No analysis found" >> performance_comparison.md
+            cat "$ARM_REPORT" >> performance_comparison.md
             echo '```' >> performance_comparison.md
             echo "" >> performance_comparison.md
+          elif [[ -f perf-arm64/perf_arm64.log ]]; then
+            echo "### Raw Perf Log" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
+            grep -A 20 "Performance counter stats" perf-arm64/perf_arm64.log >> performance_comparison.md || echo "Log data not found" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
           else
             echo "*ARM64 results not available*" >> performance_comparison.md
-            echo "" >> performance_comparison.md
           fi
 
           # Footer
