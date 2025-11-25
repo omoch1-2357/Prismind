@@ -43,9 +43,18 @@ jobs:
       - name: Install perf tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y linux-tools-common linux-tools-generic "linux-tools-$(uname -r)" || \
-          sudo apt-get install -y "linux-tools-$(uname -r)" || \
-          echo "Warning: Could not install exact kernel version tools, using generic"
+          export DEBIAN_FRONTEND=noninteractive
+          
+          # Azure kernel specific installation
+          if [[ "$(uname -r)" == *"-azure"* ]]; then
+             echo "Detected Azure Kernel, attempting to install azure-specific tools..."
+             sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
+          fi
+
+          # Standard installation attempt (Specific version -> Generic fallback)
+          sudo apt-get install -y linux-tools-common linux-tools-generic "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" || \
+          sudo apt-get install -y linux-tools-generic || \
+          echo "Warning: Could not install exact kernel version tools, hope generic works"
 
       - name: Verify perf installation
         run: |
