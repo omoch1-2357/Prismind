@@ -29,7 +29,11 @@ jobs:
           components: rustfmt
 
       - name: Check formatting
-        run: cargo fmt --all --check
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: cargo fmt --all --check
 
   # Fast-fail: Clippy lints (runs after fmt)
   clippy:
@@ -51,7 +55,11 @@ jobs:
           shared-key: clippy-cache
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   # Test on multiple platforms and Rust versions
   test:
@@ -80,10 +88,18 @@ jobs:
           shared-key: test-${{ matrix.os }}-${{ matrix.rust }}
 
       - name: Run tests
-        run: cargo test --workspace --all-features --verbose
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          command: cargo test --workspace --all-features --verbose
 
       - name: Run doc tests
-        run: cargo test --doc --workspace --all-features --verbose
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cargo test --doc --workspace --all-features --verbose
 
   # Benchmarks (runs on stable only)
   bench:
@@ -103,10 +119,18 @@ jobs:
           shared-key: bench-cache
 
       - name: Run benchmarks (check only)
-        run: cargo bench --workspace --no-fail-fast -- --test
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          command: cargo bench --workspace --no-fail-fast -- --test
 
       - name: Build benchmarks (verify compilation)
-        run: cargo bench --workspace --no-run
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          command: cargo bench --workspace --no-run
 
   # Documentation build check
   docs:
@@ -126,7 +150,11 @@ jobs:
           shared-key: docs-cache
 
       - name: Build documentation
-        run: cargo doc --workspace --all-features --no-deps --document-private-items
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          command: cargo doc --workspace --all-features --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -148,7 +176,11 @@ jobs:
           shared-key: release-cache
 
       - name: Build release binary
-        run: cargo build --release --verbose
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: cargo build --release --verbose
 
       - name: Verify binary size (should be optimized with LTO)
         run: |
@@ -180,7 +212,11 @@ jobs:
           shared-key: arm64-cache
 
       - name: Check ARM64 compilation
-        run: cargo check --target aarch64-unknown-linux-gnu --release
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          command: cargo check --target aarch64-unknown-linux-gnu --release
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 

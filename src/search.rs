@@ -640,42 +640,46 @@ fn is_edge_branchless(pos: u8) -> bool {
 /// # Requirements
 /// * 16.3: ブランチレス実装で分岐予測ミスを最小化
 /// * 16.4: ARM64とx86_64での性能比較
+#[inline]
+fn compute_move_priority(pos: u8, tt_best_move: Option<u8>) -> i32 {
+    let tt_bonus = if let Some(tt_move) = tt_best_move {
+        if tt_move == pos { 1000 } else { 0 }
+    } else {
+        0
+    };
+    let corner_bonus = (is_corner_branchless(pos) as i32) * 100;
+    let x_penalty = (is_x_square_branchless(pos) as i32) * (-60);
+    let edge_bonus = (is_edge_branchless(pos) as i32) * 50;
+    let base_score = 10;
+    tt_bonus + corner_bonus + x_penalty + edge_bonus + base_score
+}
+
 pub fn order_moves_branchless(moves: u64, tt_best_move: Option<u8>) -> ([u8; 32], usize) {
     let mut move_list = [0u8; 32];
+    let mut priorities = [0i32; 32];
     let mut count = 0;
 
     let mut move_bits = moves;
     while move_bits != 0 {
         let pos = move_bits.trailing_zeros() as u8;
         move_list[count] = pos;
+        priorities[count] = compute_move_priority(pos, tt_best_move);
         count += 1;
         move_bits &= move_bits - 1;
     }
 
-    // ブランチレス優先度付け関数
-    let priority = |pos: u8| -> i32 {
-        let tt_bonus = if let Some(tt_move) = tt_best_move {
-            ((pos == tt_move) as i32) * 1000
-        } else {
-            0
-        };
-        let corner_bonus = (is_corner_branchless(pos) as i32) * 100;
-        let x_penalty = (is_x_square_branchless(pos) as i32) * (-60);
-        let edge_bonus = (is_edge_branchless(pos) as i32) * 50;
-        let base_score = 10;
-        tt_bonus + corner_bonus + x_penalty + edge_bonus + base_score
-    };
-
     // 挿入ソート（小規模配列に効率的）
     for i in 1..count {
         let key = move_list[i];
-        let key_priority = priority(key);
+        let key_priority = priorities[i];
         let mut j = i;
-        while j > 0 && priority(move_list[j - 1]) < key_priority {
+        while j > 0 && priorities[j - 1] < key_priority {
             move_list[j] = move_list[j - 1];
+            priorities[j] = priorities[j - 1];
             j -= 1;
         }
         move_list[j] = key;
+        priorities[j] = key_priority;
     }
 
     (move_list, count)

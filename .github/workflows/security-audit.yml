@@ -23,10 +23,18 @@ jobs:
         run: cargo install cargo-audit
         
       - name: Run security audit
-        run: cargo audit --deny warnings
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cargo audit --deny warnings
         
       - name: Check for yanked crates
-        run: cargo audit --deny yanked
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cargo audit --deny yanked
 
   cargo-deny:
     name: Cargo Deny
@@ -38,10 +46,22 @@ jobs:
         run: cargo install cargo-deny
         
       - name: Check bans
-        run: cargo deny check bans
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cargo deny check bans
         
       - name: Check advisories
-        run: cargo deny check advisories
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cargo deny check advisories
         
       - name: Check sources
-        run: cargo deny check sources
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cargo deny check sources
