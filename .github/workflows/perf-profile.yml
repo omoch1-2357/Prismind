@@ -104,6 +104,9 @@ jobs:
             BRANCH_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | tail -1 | grep -oP '\d+\.\d+' || echo "N/A")
             echo "branch_miss_rate=$BRANCH_MISS_RATE" >> "$GITHUB_OUTPUT"
 
+            IPC=$(grep "IPC:" "$REPORT_FILE" | grep -oP '\d+\.\d+' || echo "N/A")
+            echo "ipc=$IPC" >> "$GITHUB_OUTPUT"
+
             # Status checks
             CACHE_STATUS="UNKNOWN"
             BRANCH_STATUS="UNKNOWN"
@@ -169,9 +172,18 @@ jobs:
       - name: Install perf tools
         run: |
           sudo apt-get update
+          export DEBIAN_FRONTEND=noninteractive
+          
+          echo "Kernel version: $(uname -r)"
+
+          if [[ "$(uname -r)" == *"-azure"* ]]; then
+             echo "Installing Azure-specific tools..."
+             sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
+          fi
+
           sudo apt-get install -y linux-tools-common linux-tools-generic "linux-tools-$(uname -r)" || \
-          sudo apt-get install -y "linux-tools-$(uname -r)" || \
-          echo "Warning: Could not install exact kernel version tools, using generic"
+          sudo apt-get install -y linux-tools-generic || \
+          echo "Warning: Could not install exact kernel version tools"
 
       - name: Verify perf installation
         run: |
@@ -213,8 +225,12 @@ jobs:
 
             CACHE_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | head -1 | grep -oP '\d+\.\d+' || echo "N/A")
             echo "cache_miss_rate=$CACHE_MISS_RATE" >> "$GITHUB_OUTPUT"
+            
             BRANCH_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | tail -1 | grep -oP '\d+\.\d+' || echo "N/A")
             echo "branch_miss_rate=$BRANCH_MISS_RATE" >> "$GITHUB_OUTPUT"
+            
+            IPC=$(grep "IPC:" "$REPORT_FILE" | grep -oP '\d+\.\d+' || echo "N/A")
+            echo "ipc=$IPC" >> "$GITHUB_OUTPUT"
 
             CACHE_STATUS="UNKNOWN"
             BRANCH_STATUS="UNKNOWN"
