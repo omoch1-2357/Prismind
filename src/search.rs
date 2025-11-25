@@ -2909,6 +2909,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_iterative_deepening_monitors_elapsed_time() {
         // Requirement 7.6: 探索開始から経過時間を継続的に監視
         if !std::path::Path::new("patterns.csv").exists() {
@@ -2954,6 +2955,7 @@ mod tests {
     // ========== Task 6.2: 時間管理と探索制御 Tests (TDD - RED) ==========
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_iterative_deepening_time_threshold_80_percent() {
         // Requirement 7.4: 時間制限の80%を使用した際に次の深さの探索をスキップ
         if !std::path::Path::new("patterns.csv").exists() {
@@ -3070,6 +3072,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_iterative_deepening_time_limit_within_15ms() {
         // Requirements 9.6, 14.7: 時間制限内に最善手を返すテスト
         // 平均15ms以内に最善手を返すことを確認（100手の平均）
@@ -3471,6 +3474,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_search_search_endgame_mode() {
         use rand::{Rng, SeedableRng};
         let mut rng = rand::rngs::StdRng::seed_from_u64(12345);
@@ -3741,6 +3745,7 @@ mod tests {
 
     #[cfg(target_arch = "aarch64")]
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_arm64_branchless_performance() {
         // Requirement 16.4: ARM64での性能比較
         // このテストは性能測定のためのプレースホルダー
@@ -3779,6 +3784,7 @@ mod tests {
 
     #[cfg(target_arch = "x86_64")]
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_x86_64_branchless_performance() {
         // Requirement 16.4: x86_64での性能比較
 
@@ -3818,6 +3824,7 @@ mod tests {
     // ============================================================================
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_perf_average_search_time_15ms() {
         // Requirement 15.1: 平均15ms以内に最善手を返す（100手の平均、序盤中盤）
         use std::time::Instant;
@@ -3860,6 +3867,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_perf_alphabeta_depth6_10ms() {
         // Requirement 15.2: AlphaBeta探索が深さ6で平均10ms以内（初期盤面）
         use std::time::Instant;
@@ -4040,6 +4048,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_perf_complete_search_100ms() {
         // Requirement 15.5: 完全読みが深さ14で平均100ms以内
         use std::time::Instant;
@@ -4151,6 +4160,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore)] // Performance test: skip in debug, run in release
     fn test_perf_comprehensive_100_move_average() {
         // Comprehensive performance test: 100手の平均性能を測定
         use std::time::Instant;
