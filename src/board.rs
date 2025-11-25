@@ -1,5 +1,8 @@
 //! BitBoard盤面表現とColor型定義
 
+#[cfg(debug_assertions)]
+use std::sync::OnceLock;
+
 /// 石の色を表す列挙型
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -71,6 +74,23 @@ const MASK_NE: u64 = NOT_TOP_ROW & NOT_H_FILE;
 const MASK_NW: u64 = NOT_TOP_ROW & NOT_A_FILE;
 const MASK_SE: u64 = NOT_BOTTOM_ROW & NOT_H_FILE;
 const MASK_SW: u64 = NOT_BOTTOM_ROW & NOT_A_FILE;
+
+#[cfg(debug_assertions)]
+#[inline]
+fn paranoid_move_validation_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("PRISMIND_VALIDATE_MOVES")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE"))
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(not(debug_assertions))]
+#[inline]
+fn paranoid_move_validation_enabled() -> bool {
+    false
+}
 
 #[inline(always)]
 fn shift_left_masked(bits: u64, mask: u64, shift: u32) -> u64 {
@@ -527,14 +547,41 @@ pub fn legal_moves(board: &BitBoard) -> u64 {
     moves |= empty & line_moves_positive(player, opponent, 9, MASK_NE);
     moves |= empty & line_moves_negative(player, opponent, 9, MASK_SW);
 
-    if cfg!(debug_assertions) {
-        let mut bits = moves;
-        while bits != 0 {
-            let pos = bits.trailing_zeros() as u8;
-            let move_bit = 1u64 << pos;
-            let flips = compute_flips(player, opponent, move_bit);
-            if flips == 0 {
-                eprintln!(
+    #[cfg(debug_assertions)]
+    {
+        if paranoid_move_validation_enabled() {
+            let mut bits = moves;
+            while bits != 0 {
+                let pos = bits.trailing_zeros() as u8;
+                let move_bit = 1u64 << pos;
+                let flips = compute_flips(player, opponent, move_bit);
+                if flips == 0 {
+                    eprintln!(
+                        "legal_moves produced illegal move (pos={}, player={:016x}, opponent={:016x}, mask={:016x})\n{}",
+                        pos,
+                        player,
+                        opponent,
+                        moves,
+                        display(board, false)
+                    );
+                    let dir_masks = [
+                        ("E", line_moves_positive(player, opponent, 1, MASK_E)),
+                        ("W", line_moves_negative(player, opponent, 1, MASK_W)),
+                        ("N", line_moves_positive(player, opponent, 8, MASK_N)),
+                        ("S", line_moves_negative(player, opponent, 8, MASK_S)),
+                        ("NE", line_moves_positive(player, opponent, 9, MASK_NE)),
+                        ("SW", line_moves_negative(player, opponent, 9, MASK_SW)),
+                        ("NW", line_moves_positive(player, opponent, 7, MASK_NW)),
+                        ("SE", line_moves_negative(player, opponent, 7, MASK_SE)),
+                    ];
+                    for (label, dir_mask) in dir_masks.iter() {
+                        if dir_mask & move_bit != 0 {
+                            eprintln!("  direction {} contributed to move", label);
+                        }
+                    }
+                }
+                debug_assert!(
+                    flips != 0,
                     "legal_moves produced illegal move (pos={}, player={:016x}, opponent={:016x}, mask={:016x})\n{}",
                     pos,
                     player,
@@ -542,32 +589,8 @@ pub fn legal_moves(board: &BitBoard) -> u64 {
                     moves,
                     display(board, false)
                 );
-                let dir_masks = [
-                    ("E", line_moves_positive(player, opponent, 1, MASK_E)),
-                    ("W", line_moves_negative(player, opponent, 1, MASK_W)),
-                    ("N", line_moves_positive(player, opponent, 8, MASK_N)),
-                    ("S", line_moves_negative(player, opponent, 8, MASK_S)),
-                    ("NE", line_moves_positive(player, opponent, 9, MASK_NE)),
-                    ("SW", line_moves_negative(player, opponent, 9, MASK_SW)),
-                    ("NW", line_moves_positive(player, opponent, 7, MASK_NW)),
-                    ("SE", line_moves_negative(player, opponent, 7, MASK_SE)),
-                ];
-                for (label, dir_mask) in dir_masks.iter() {
-                    if dir_mask & move_bit != 0 {
-                        eprintln!("  direction {} contributed to move", label);
-                    }
-                }
+                bits &= bits - 1;
             }
-            debug_assert!(
-                flips != 0,
-                "legal_moves produced illegal move (pos={}, player={:016x}, opponent={:016x}, mask={:016x})\n{}",
-                pos,
-                player,
-                opponent,
-                moves,
-                display(board, false)
-            );
-            bits &= bits - 1;
         }
     }
     moves
@@ -666,10 +689,16 @@ pub fn make_move(board: &mut BitBoard, pos: u8) -> Result<UndoInfo, GameError> {
 #[inline]
 pub fn make_move_unchecked(board: &mut BitBoard, pos: u8) -> UndoInfo {
     debug_assert!(pos < 64, "position must be within board bounds");
-    debug_assert!(
-        (legal_moves(board) & (1u64 << pos)) != 0,
-        "make_move_unchecked requires a legal move"
-    );
+    #[cfg(debug_assertions)]
+    {
+        if paranoid_move_validation_enabled() {
+            let legal = legal_moves(board);
+            debug_assert!(
+                (legal & (1u64 << pos)) != 0,
+                "make_move_unchecked requires a legal move"
+            );
+        }
+    }
     apply_move_unchecked(board, pos)
 }
 
