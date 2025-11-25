@@ -44,17 +44,21 @@ jobs:
         run: |
           sudo apt-get update
           export DEBIAN_FRONTEND=noninteractive
-          
-          # Azure kernel specific installation
-          if [[ "$(uname -r)" == *"-azure"* ]]; then
-             echo "Detected Azure Kernel, attempting to install azure-specific tools..."
-             sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
-          fi
 
-          # Standard installation attempt (Specific version -> Generic fallback)
-          sudo apt-get install -y linux-tools-common linux-tools-generic "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" || \
-          sudo apt-get install -y linux-tools-generic || \
-          echo "Warning: Could not install exact kernel version tools, hope generic works"
+          echo "Kernel: $(uname -r)"
+
+          # Azure kernel specific installation
+          if sudo apt-get install -y "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" linux-tools-common; then
+             echo "Successfully installed specific kernel tools."
+          else
+             echo "Specific tools failed, trying generic/azure fallbacks..."
+             # Fallback for Azure specifically if exact version match fails
+             if [[ "$(uname -r)" == *"-azure"* ]]; then
+                sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
+             fi
+             # Generic fallback
+             sudo apt-get install -y linux-tools-generic || true
+          fi
 
       - name: Verify perf installation
         run: |
@@ -174,11 +178,18 @@ jobs:
           sudo apt-get update
           export DEBIAN_FRONTEND=noninteractive
           
-          echo "Kernel version: $(uname -r)"
+          echo "Kernel: $(uname -r)"
 
-          if [[ "$(uname -r)" == *"-azure"* ]]; then
-             echo "Installing Azure-specific tools..."
-             sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
+          if sudo apt-get install -y "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" linux-tools-common; then
+             echo "Successfully installed specific kernel tools."
+          else
+             echo "Specific tools failed, trying fallbacks..."
+             if [[ "$(uname -r)" == *"-azure"* ]]; then
+                # Azure meta-package fallback
+                sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
+             fi
+             # Generic fallback
+             sudo apt-get install -y linux-tools-generic || true
           fi
 
           sudo apt-get install -y linux-tools-common linux-tools-generic "linux-tools-$(uname -r)" || \
