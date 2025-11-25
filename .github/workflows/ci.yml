@@ -189,8 +189,9 @@ jobs:
 
   # ARM64 cross-compilation check (validates ARM64 optimization settings)
   cross-compile-arm64:
-    name: ARM64 Cross-Compilation Check
-    runs-on: ubuntu-latest
+    name: ARM64 Build (native on ARM runner)
+    # Use a hosted ARM64 Linux runner so we build natively instead of cross-compiling
+    runs-on: ubuntu-24.04-arm
     needs: clippy
     steps:
       - name: Checkout code
@@ -198,27 +199,20 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-gnu
-
-      - name: Install cross-compilation toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Cache Cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: arm64-cache
 
-      - name: Check ARM64 compilation
+      - name: Verify native ARM/Linux build
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 15
           max_attempts: 3
-          command: cargo check --target aarch64-unknown-linux-gnu --release
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          command: |
+            rustc --version --verbose | grep host
+            cargo check --release
 
   # Final status check (all jobs must pass)
   ci-success:

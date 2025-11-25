@@ -23,8 +23,9 @@ jobs:
     # Use ARM64 runner:
     # - macos-latest: Apple Silicon (M1/M2/M3) - Available on free GitHub
     # - ubuntu-24.04-arm: ARM64 Linux - Requires GitHub Enterprise Cloud
-    # Using macos-latest for broader compatibility
-    runs-on: macos-latest
+    # Use ARM64 Linux runner for native ARM benchmarking
+    # Note: ubuntu-24.04-arm is an ARM64 GitHub-hosted Linux runner
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - name: Checkout code
@@ -251,7 +252,9 @@ jobs:
   # Task 14.2: Evaluation System Final Performance Verification on ARM64
   arm64-eval-benchmarks:
     name: ARM64 Evaluation System Benchmark
-    runs-on: macos-latest
+    # Prefer native ARM64 Linux runner instead of macOS so the benchmarks
+    # exercise the same Linux/AArch64 code path we ship in release builds.
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - name: Checkout code
