@@ -44,17 +44,21 @@ jobs:
         run: |
           sudo apt-get update
           export DEBIAN_FRONTEND=noninteractive
-          
-          # Azure kernel specific installation
-          if [[ "$(uname -r)" == *"-azure"* ]]; then
-             echo "Detected Azure Kernel, attempting to install azure-specific tools..."
-             sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
-          fi
 
-          # Standard installation attempt (Specific version -> Generic fallback)
-          sudo apt-get install -y linux-tools-common linux-tools-generic "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" || \
-          sudo apt-get install -y linux-tools-generic || \
-          echo "Warning: Could not install exact kernel version tools, hope generic works"
+          echo "Kernel: $(uname -r)"
+
+          # Azure kernel specific installation
+          if sudo apt-get install -y "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" linux-tools-common; then
+             echo "Successfully installed specific kernel tools."
+          else
+             echo "Specific tools failed, trying generic/azure fallbacks..."
+             # Fallback for Azure specifically if exact version match fails
+             if [[ "$(uname -r)" == *"-azure"* ]]; then
+                sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
+             fi
+             # Generic fallback
+             sudo apt-get install -y linux-tools-generic || true
+          fi
 
       - name: Verify perf installation
         run: |
@@ -103,6 +107,9 @@ jobs:
             # Extract branch miss rate
             BRANCH_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | tail -1 | grep -oP '\d+\.\d+' || echo "N/A")
             echo "branch_miss_rate=$BRANCH_MISS_RATE" >> "$GITHUB_OUTPUT"
+
+            IPC=$(grep "IPC:" "$REPORT_FILE" | grep -oP '\d+\.\d+' || echo "N/A")
+            echo "ipc=$IPC" >> "$GITHUB_OUTPUT"
 
             # Status checks
             CACHE_STATUS="UNKNOWN"
@@ -169,9 +176,21 @@ jobs:
       - name: Install perf tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y linux-tools-common linux-tools-generic "linux-tools-$(uname -r)" || \
-          sudo apt-get install -y "linux-tools-$(uname -r)" || \
-          echo "Warning: Could not install exact kernel version tools, using generic"
+          export DEBIAN_FRONTEND=noninteractive
+          
+          echo "Kernel: $(uname -r)"
+
+          if sudo apt-get install -y "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" linux-tools-common; then
+             echo "Successfully installed specific kernel tools."
+          else
+             echo "Specific tools failed, trying fallbacks..."
+             if [[ "$(uname -r)" == *"-azure"* ]]; then
+                # Azure meta-package fallback
+                sudo apt-get install -y linux-tools-azure linux-cloud-tools-azure || true
+             fi
+             # Generic fallback
+             sudo apt-get install -y linux-tools-generic || true
+          fi
 
       - name: Verify perf installation
         run: |
@@ -213,8 +232,12 @@ jobs:
 
             CACHE_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | head -1 | grep -oP '\d+\.\d+' || echo "N/A")
             echo "cache_miss_rate=$CACHE_MISS_RATE" >> "$GITHUB_OUTPUT"
+            
             BRANCH_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | tail -1 | grep -oP '\d+\.\d+' || echo "N/A")
             echo "branch_miss_rate=$BRANCH_MISS_RATE" >> "$GITHUB_OUTPUT"
+            
+            IPC=$(grep "IPC:" "$REPORT_FILE" | grep -oP '\d+\.\d+' || echo "N/A")
+            echo "ipc=$IPC" >> "$GITHUB_OUTPUT"
 
             CACHE_STATUS="UNKNOWN"
             BRANCH_STATUS="UNKNOWN"
@@ -303,16 +326,21 @@ jobs:
 
           EOF
 
+          X86_REPORT=$(find perf-x86-64/perf_results -name "perf_report_*.txt" | head -n1)
+
           # Append x86_64 results if available
-          if [[ -f perf-x86-64/perf_x86_64.log ]]; then
-            echo "### Perf Stat Output" >> performance_comparison.md
+          if [[ -f "$X86_REPORT" ]]; then
+            echo "### Analysis Output" >> performance_comparison.md
             echo '```' >> performance_comparison.md
-            grep -A 20 "Performance Analysis" perf-x86-64/perf_x86_64.log >> performance_comparison.md || echo "No analysis found" >> performance_comparison.md
+            cat "$X86_REPORT" >> performance_comparison.md
             echo '```' >> performance_comparison.md
-            echo "" >> performance_comparison.md
+          elif [[ -f perf-x86-64/perf_x86_64.log ]]; then
+            echo "### Raw Perf Log" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
+            grep -A 20 "Performance counter stats" perf-x86-64/perf_x86_64.log >> performance_comparison.md || echo "Log data not found" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
           else
             echo "*x86_64 results not available*" >> performance_comparison.md
-            echo "" >> performance_comparison.md
           fi
 
           # ARM64 section
@@ -325,15 +353,21 @@ jobs:
 
           EOF
 
-          if [[ -f perf-arm64/perf_arm64.log ]]; then
-            echo "### Perf Stat Output" >> performance_comparison.md
+          ARM_REPORT=$(find perf-arm64/perf_results -name "perf_report_*.txt" | head -n1)
+
+          if [[ -f "$ARM_REPORT" ]]; then
+            echo "### Analysis Output" >> performance_comparison.md
             echo '```' >> performance_comparison.md
-            grep -A 20 "Performance Analysis" perf-arm64/perf_arm64.log >> performance_comparison.md || echo "No analysis found" >> performance_comparison.md
+            cat "$ARM_REPORT" >> performance_comparison.md
             echo '```' >> performance_comparison.md
             echo "" >> performance_comparison.md
+          elif [[ -f perf-arm64/perf_arm64.log ]]; then
+            echo "### Raw Perf Log" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
+            grep -A 20 "Performance counter stats" perf-arm64/perf_arm64.log >> performance_comparison.md || echo "Log data not found" >> performance_comparison.md
+            echo '```' >> performance_comparison.md
           else
             echo "*ARM64 results not available*" >> performance_comparison.md
-            echo "" >> performance_comparison.md
           fi
 
           # Footer
