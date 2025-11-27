@@ -52,14 +52,20 @@ use thiserror::Error;
 // Submodules
 pub mod adam;
 pub mod eligibility_trace;
+pub mod game_history;
 pub mod score;
+pub mod self_play;
 pub mod td_learner;
 
 // Re-export public types
 pub use adam::{AdamMoments, AdamOptimizer};
 pub use eligibility_trace::EligibilityTrace;
 pub use error::LearningError;
+pub use game_history::{
+    GameHistory, MAX_MOVES_PER_GAME, MoveRecord as HistoryMoveRecord, NUM_PATTERN_INSTANCES,
+};
 pub use score::{CENTER, SCALE, initial_value, stone_diff_to_u16, u16_to_stone_diff};
+pub use self_play::{DEFAULT_SEARCH_TIME_MS, EpsilonSchedule, GameResult, play_game};
 pub use td_learner::{MoveRecord, TDLearner, TDUpdateStats};
 
 /// Error types for the learning module

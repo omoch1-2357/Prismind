@@ -62,7 +62,7 @@
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8_
 
 ## Task 4. Game History and Self-Play Engine
-- [ ] 4.1 (P) Implement game history recording
+- [x] 4.1 (P) Implement game history recording
   - Create MoveRecord structure with board state, leaf value, 56 pattern indices, and stage
   - Create GameHistory container supporting up to 60 moves per game
   - Implement push operation for adding move records
@@ -71,14 +71,14 @@
   - Pre-allocate capacity for 60 moves to avoid reallocation
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7_
 
-- [ ] 4.2 Implement epsilon schedule for exploration control
+- [x] 4.2 Implement epsilon schedule for exploration control
   - Return epsilon=0.15 for games 0-299,999 (high exploration phase)
   - Return epsilon=0.05 for games 300,000-699,999 (moderate exploration)
   - Return epsilon=0.0 for games 700,000-999,999 (exploitation phase)
   - Implement as stateless computation based on game number
   - _Requirements: 4.3, 4.4, 4.5_
 
-- [ ] 4.3 Implement self-play game engine
+- [x] 4.3 Implement self-play game engine
   - Play complete games from initial Othello position to termination
   - Use Phase 2 Search API with 15ms time limit per move
   - Apply epsilon-greedy move selection using epsilon schedule
