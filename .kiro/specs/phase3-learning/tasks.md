@@ -138,7 +138,7 @@
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6_
 
 ## Task 8. Training Engine Orchestration
-- [ ] 8.1 Implement training engine core with parallel execution
+- [x] 8.1 Implement training engine core with parallel execution
   - Manage rayon thread pool for 4-thread parallel game execution
   - Coordinate sequential TD updates after batch of games completes
   - Acquire read locks for parallel evaluation during games
@@ -150,7 +150,7 @@
   - Depends on Tasks 3.3, 4.3, 5, 6.1, 6.2, 7
   - _Requirements: 4.10, 13.1, 13.2, 13.5, 13.6, 13.8_
 
-- [ ] 8.2 Implement checkpoint resume and graceful shutdown
+- [x] 8.2 Implement checkpoint resume and graceful shutdown
   - Support initialization from checkpoint file for training resume
   - Restore pattern weights, Adam state, and metadata on resume
   - Validate loaded state consistency

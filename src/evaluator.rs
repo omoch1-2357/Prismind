@@ -179,7 +179,7 @@ pub fn u16_to_score_simd(values: &[u16; 8]) -> [f32; 8] {
 /// # メモリ使用量
 ///
 /// 総使用量: 約70-80MB（30ステージ × 約2.3MB/ステージ）
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EvaluationTable {
     /// \[ステージ\]\[平坦化配列\]の2次元データ
     /// 各ステージは全14パターンのエントリを連続配置
@@ -209,7 +209,7 @@ pub struct EvaluationTable {
 /// let eval = evaluator.evaluate(&board);
 /// println!("評価値: {}", eval);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Evaluator {
     /// パターン定義配列（14個）
     patterns: [Pattern; 14],
@@ -379,6 +379,39 @@ impl Evaluator {
         let table = EvaluationTable::new(&patterns);
 
         Ok(Self { patterns, table })
+    }
+
+    /// Create an Evaluator from an existing EvaluationTable.
+    ///
+    /// This constructor is used for Phase 3 learning where the evaluation
+    /// table is shared and updated during training. A copy of the table
+    /// data is made for thread-safe parallel evaluation.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - Reference to an existing EvaluationTable
+    /// * `patterns` - Pattern definitions array
+    ///
+    /// # Returns
+    ///
+    /// A new Evaluator that uses a copy of the provided table.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use prismind::evaluator::{Evaluator, EvaluationTable};
+    /// use prismind::pattern::load_patterns;
+    ///
+    /// let patterns = load_patterns("patterns.csv").unwrap();
+    /// let table = EvaluationTable::new(&patterns);
+    /// let evaluator = Evaluator::from_table(&table, &patterns);
+    /// ```
+    pub fn from_table(table: &EvaluationTable, patterns: &[Pattern; 14]) -> Self {
+        // Clone the table data for thread-safe usage
+        Self {
+            patterns: *patterns,
+            table: table.clone(),
+        }
     }
 
     /// 盤面の評価値を計算

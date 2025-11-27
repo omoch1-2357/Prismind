@@ -62,6 +62,7 @@ pub mod score;
 pub mod self_play;
 pub mod shared_evaluator;
 pub mod td_learner;
+pub mod training_engine;
 
 // Re-export public types
 pub use adam::{AdamMoments, AdamOptimizer};
@@ -83,6 +84,10 @@ pub use score::{CENTER, SCALE, initial_value, stone_diff_to_u16, u16_to_stone_di
 pub use self_play::{DEFAULT_SEARCH_TIME_MS, EpsilonSchedule, GameResult, play_game};
 pub use shared_evaluator::SharedEvaluator;
 pub use td_learner::{MoveRecord, TDLearner, TDUpdateStats};
+pub use training_engine::{
+    DEFAULT_NUM_THREADS, DEFAULT_TT_SIZE_MB, MAX_MEMORY_BUDGET, MIN_TT_SIZE_MB,
+    TOTAL_PATTERN_ENTRIES, TrainingConfig, TrainingEngine, TrainingStats,
+};
 
 /// Error types for the learning module
 mod error {
