@@ -54,6 +54,7 @@ use thiserror::Error;
 // Submodules
 pub mod adam;
 pub mod checkpoint;
+pub mod convergence;
 pub mod eligibility_trace;
 pub mod game_history;
 pub mod logger;
@@ -65,6 +66,10 @@ pub mod td_learner;
 // Re-export public types
 pub use adam::{AdamMoments, AdamOptimizer};
 pub use checkpoint::{CHECKPOINT_MAGIC, CheckpointManager, CheckpointMeta};
+pub use convergence::{
+    CONVERGENCE_REPORT_INTERVAL, ConvergenceMetrics, ConvergenceMonitor, IMPROVEMENT_THRESHOLD,
+    MIN_WIN_RATE_VS_RANDOM, RUNNING_AVERAGE_WINDOW, STAGNATION_WINDOW, TARGET_UPDATES_PER_ENTRY,
+};
 pub use eligibility_trace::EligibilityTrace;
 pub use error::LearningError;
 pub use game_history::{
