@@ -27,7 +27,7 @@
   - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7_
 
 ## Task 3. Core Algorithm Components
-- [ ] 3.1 (P) Implement Eligibility Trace storage
+- [x] 3.1 (P) Implement Eligibility Trace storage
   - Create sparse HashMap-based storage keyed by (pattern_id, stage, index) tuples
   - Implement increment operation that adds 1.0 to trace value on pattern visit
   - Implement decay operation that multiplies all traces by lambda (0.3)
@@ -36,7 +36,7 @@
   - Minimize memory usage through sparse representation
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
 
-- [ ] 3.2 (P) Implement Adam optimizer with moment vectors
+- [x] 3.2 (P) Implement Adam optimizer with moment vectors
   - Initialize with hyperparameters: alpha=0.025, beta1=0.9, beta2=0.999, epsilon=1e-8
   - Allocate first moment (m) vectors matching EvaluationTable layout (~114 MB)
   - Allocate second moment (v) vectors matching EvaluationTable layout (~114 MB)
@@ -47,7 +47,7 @@
   - Add memory usage tracking method
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10_
 
-- [ ] 3.3 Implement TD-Leaf learner with backward updates
+- [x] 3.3 Implement TD-Leaf learner with backward updates
   - Configure lambda=0.3 as trace decay parameter
   - Iterate game history in reverse order from final to initial position
   - Compute TD error as difference between target value and current evaluation

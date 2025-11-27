@@ -50,11 +50,17 @@ use crate::search::SearchError;
 use thiserror::Error;
 
 // Submodules
+pub mod adam;
+pub mod eligibility_trace;
 pub mod score;
+pub mod td_learner;
 
 // Re-export public types
+pub use adam::{AdamMoments, AdamOptimizer};
+pub use eligibility_trace::EligibilityTrace;
 pub use error::LearningError;
 pub use score::{CENTER, SCALE, initial_value, stone_diff_to_u16, u16_to_stone_diff};
+pub use td_learner::{MoveRecord, TDLearner, TDUpdateStats};
 
 /// Error types for the learning module
 mod error {
