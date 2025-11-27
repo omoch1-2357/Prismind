@@ -1,7 +1,7 @@
 # Implementation Plan
 
 ## Task 1. Project Setup and Dependencies
-- [ ] 1.1 (P) Configure Cargo dependencies for learning module
+- [x] 1.1 (P) Configure Cargo dependencies for learning module
   - Add bincode 2.0+ for checkpoint serialization
   - Add rayon 1.10+ for parallel game execution
   - Add chrono for timestamp handling
@@ -10,7 +10,7 @@
   - Promote rand from dev-dependency to regular dependency
   - _Requirements: 6.1, 7.6, 12.7, 13.8_
 
-- [ ] 1.2 (P) Create learning module structure
+- [x] 1.2 (P) Create learning module structure
   - Create src/learning/mod.rs with module declarations
   - Define LearningError enum with all error variants (Io, InvalidCheckpoint, Search, EvaluationDivergence, MemoryAllocation, Config, Interrupted)
   - Export public types for external access
