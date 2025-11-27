@@ -49,8 +49,12 @@
 use crate::search::SearchError;
 use thiserror::Error;
 
+// Submodules
+pub mod score;
+
 // Re-export public types
 pub use error::LearningError;
+pub use score::{CENTER, SCALE, initial_value, stone_diff_to_u16, u16_to_stone_diff};
 
 /// Error types for the learning module
 mod error {

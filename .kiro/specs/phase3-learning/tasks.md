@@ -17,7 +17,7 @@
   - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6_
 
 ## Task 2. Score Representation and Conversion Utilities
-- [ ] 2. Implement score conversion functions
+- [x] 2. Implement score conversion functions
   - Define CENTER constant as 32768 for zero stone-difference
   - Define SCALE constant as 256.0 for conversion factor
   - Implement u16 to stone difference conversion: (value - 32768) / 256.0
