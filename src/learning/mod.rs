@@ -35,8 +35,8 @@
 //! - Req 4.1-4.10: Self-play engine (SelfPlayGame)
 //! - Req 5.1-5.7: Game history recording (GameHistory)
 //! - Req 9.1-9.7: Phase 2 integration (SharedEvaluator)
-//! - Req 6.1-6.10: Checkpoint management (CheckpointManager, future)
-//! - Req 7.1-7.8: Training logging (TrainingLogger, future)
+//! - Req 6.1-6.10: Checkpoint management (CheckpointManager)
+//! - Req 7.1-7.8: Training logging (TrainingLogger)
 //!
 //! # Example
 //!
@@ -53,8 +53,10 @@ use thiserror::Error;
 
 // Submodules
 pub mod adam;
+pub mod checkpoint;
 pub mod eligibility_trace;
 pub mod game_history;
+pub mod logger;
 pub mod score;
 pub mod self_play;
 pub mod shared_evaluator;
@@ -62,10 +64,15 @@ pub mod td_learner;
 
 // Re-export public types
 pub use adam::{AdamMoments, AdamOptimizer};
+pub use checkpoint::{CHECKPOINT_MAGIC, CheckpointManager, CheckpointMeta};
 pub use eligibility_trace::EligibilityTrace;
 pub use error::LearningError;
 pub use game_history::{
     GameHistory, MAX_MOVES_PER_GAME, MoveRecord as HistoryMoveRecord, NUM_PATTERN_INSTANCES,
+};
+pub use logger::{
+    BatchStats, DEFAULT_BATCH_INTERVAL, DEFAULT_CHECKPOINT_INTERVAL, DEFAULT_DETAILED_INTERVAL,
+    DetailedStats, EVAL_DIVERGENCE_THRESHOLD, SyncTrainingLogger, TrainingLogger,
 };
 pub use score::{CENTER, SCALE, initial_value, stone_diff_to_u16, u16_to_stone_diff};
 pub use self_play::{DEFAULT_SEARCH_TIME_MS, EpsilonSchedule, GameResult, play_game};

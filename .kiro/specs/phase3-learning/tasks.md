@@ -102,7 +102,7 @@
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7_
 
 ## Task 6. Persistence Layer
-- [ ] 6.1 (P) Implement checkpoint manager for training state
+- [x] 6.1 (P) Implement checkpoint manager for training state
   - Define binary format with 24-byte magic header "OTHELLO_AI_CHECKPOINT_V1"
   - Save pattern table weights (~57 MB) using bincode serialization
   - Save Adam optimizer m and v moments (~228 MB)
@@ -116,7 +116,7 @@
   - Implement find_latest to locate most recent checkpoint
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 6.10_
 
-- [ ] 6.2 (P) Implement training logger for statistics output
+- [x] 6.2 (P) Implement training logger for statistics output
   - Output real-time statistics every 100 games: stone difference, win rates, move count, elapsed time
   - Output detailed statistics every 10,000 games: evaluation distribution, search depth, search time, TT hit rate
   - Output complete summary at each checkpoint
