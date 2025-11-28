@@ -87,8 +87,8 @@ fn test_ctrlc_available() {
     assert!(!running.load(Ordering::SeqCst));
 
     // Note: We don't actually set up ctrlc handler in test as it modifies global state
-    // Just verify the crate is available by importing it
-    let _ = ctrlc::set_handler(|| {});
+    // and can only be called once per process. The actual handler is tested via
+    // TrainingEngine which uses a global OnceLock for single registration.
 }
 
 /// Test that rand is available as a regular dependency (not just dev-dependency)

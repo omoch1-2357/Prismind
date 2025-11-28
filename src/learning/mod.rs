@@ -59,6 +59,7 @@ pub mod eligibility_trace;
 pub mod error_handler;
 pub mod game_history;
 pub mod logger;
+pub mod memory;
 pub mod score;
 pub mod self_play;
 pub mod shared_evaluator;
@@ -84,6 +85,13 @@ pub use game_history::{
 pub use logger::{
     BatchStats, DEFAULT_BATCH_INTERVAL, DEFAULT_CHECKPOINT_INTERVAL, DEFAULT_DETAILED_INTERVAL,
     DetailedStats, EVAL_DIVERGENCE_THRESHOLD, SyncTrainingLogger, TrainingLogger,
+};
+pub use memory::{
+    EXPECTED_ADAM_MB, EXPECTED_ELIGIBILITY_TRACE_KB, EXPECTED_EVAL_TABLE_MB,
+    EXPECTED_GAME_HISTORY_KB, MAX_TT_SIZE_MB as MEMORY_MAX_TT_SIZE_MB, MEMORY_TOLERANCE,
+    MIN_TT_SIZE_MB as MEMORY_MIN_TT_SIZE_MB, MemoryBreakdown, MemoryMonitor, TOTAL_MEMORY_BUDGET,
+    validate_adam_memory, validate_eval_table_memory, validate_total_memory, validate_tt_size,
+    verify_game_history_released, verify_sparse_eligibility_trace,
 };
 pub use score::{CENTER, SCALE, initial_value, stone_diff_to_u16, u16_to_stone_diff};
 pub use self_play::{DEFAULT_SEARCH_TIME_MS, EpsilonSchedule, GameResult, play_game};

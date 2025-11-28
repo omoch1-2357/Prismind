@@ -33,6 +33,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use rayon::prelude::*;
@@ -77,6 +78,44 @@ pub const TOTAL_PATTERN_ENTRIES: u64 = 30
     + 2 * 243
         // patterns 12-13: 3^5
     );
+
+/// Result type for signal handler setup
+type SignalHandlerResult = Result<Arc<AtomicBool>, String>;
+
+/// Global interrupt flag shared by all TrainingEngine instances.
+/// This allows the signal handler to be registered only once per process.
+/// We use a Mutex<Option<SignalHandlerResult>> to handle the Result properly.
+static GLOBAL_INTERRUPTED: OnceLock<Mutex<SignalHandlerResult>> = OnceLock::new();
+
+/// Setup the global signal handler.
+///
+/// This function is safe to call multiple times - it will only register
+/// the handler once. Subsequent calls will return the same Arc<AtomicBool>.
+///
+/// # Returns
+///
+/// Arc<AtomicBool> that will be set to true when SIGINT/SIGTERM is received.
+fn setup_signal_handler() -> Result<Arc<AtomicBool>, LearningError> {
+    let result_mutex = GLOBAL_INTERRUPTED.get_or_init(|| {
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = Arc::clone(&flag);
+
+        let result = ctrlc::set_handler(move || {
+            flag_clone.store(true, Ordering::SeqCst);
+        })
+        .map(|_| flag)
+        .map_err(|e| format!("Failed to set signal handler: {}", e));
+
+        Mutex::new(result)
+    });
+
+    // Lock the mutex and clone the result
+    let guard = result_mutex.lock().expect("Signal handler mutex poisoned");
+    match &*guard {
+        Ok(flag) => Ok(Arc::clone(flag)),
+        Err(e) => Err(LearningError::Config(e.clone())),
+    }
+}
 
 /// Training configuration.
 #[derive(Clone, Debug)]
@@ -178,7 +217,7 @@ pub struct TrainingEngine {
     start_time: Instant,
     /// Elapsed time from previous sessions (for resume).
     previous_elapsed_secs: u64,
-    /// Interrupt flag (set by signal handler).
+    /// Interrupt flag (shared globally via Arc).
     interrupted: Arc<AtomicBool>,
 }
 
@@ -247,14 +286,8 @@ impl TrainingEngine {
         let error_tracker = ErrorTracker::new();
         let eval_recovery = EvalRecovery::new();
 
-        // Setup interrupt handler
-        let interrupted = Arc::new(AtomicBool::new(false));
-        let interrupted_clone = Arc::clone(&interrupted);
-
-        ctrlc::set_handler(move || {
-            interrupted_clone.store(true, Ordering::SeqCst);
-        })
-        .map_err(|e| LearningError::Config(format!("Failed to set signal handler: {}", e)))?;
+        // Setup interrupt handler (uses global OnceLock for single registration)
+        let interrupted = setup_signal_handler()?;
 
         Ok(Self {
             patterns,
@@ -334,14 +367,8 @@ impl TrainingEngine {
         let error_tracker = ErrorTracker::new();
         let eval_recovery = EvalRecovery::new();
 
-        // Setup interrupt handler
-        let interrupted = Arc::new(AtomicBool::new(false));
-        let interrupted_clone = Arc::clone(&interrupted);
-
-        ctrlc::set_handler(move || {
-            interrupted_clone.store(true, Ordering::SeqCst);
-        })
-        .map_err(|e| LearningError::Config(format!("Failed to set signal handler: {}", e)))?;
+        // Setup interrupt handler (uses global OnceLock for single registration)
+        let interrupted = setup_signal_handler()?;
 
         Ok(Self {
             patterns,
