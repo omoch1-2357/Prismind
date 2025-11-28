@@ -69,14 +69,15 @@ pub const MAX_MEMORY_BUDGET: usize = 600 * 1024 * 1024;
 
 /// Total pattern entries for convergence monitoring.
 /// Calculated as sum of 3^k for all 14 patterns across 30 stages.
+/// Pattern k values from patterns.csv: [10,10,10,10,8,8,8,8,6,6,5,5,4,4]
 pub const TOTAL_PATTERN_ENTRIES: u64 = 30
     * (
         4 * 59049  // patterns 0-3: 3^10
-    + 4 * 6561 // patterns 4-7: 3^8
-    + 2 * 2187 // patterns 8-9: 3^7
-    + 2 * 729  // patterns 10-11: 3^6
-    + 2 * 243
-        // patterns 12-13: 3^5
+        + 4 * 6561 // patterns 4-7: 3^8
+        + 2 * 729  // patterns 8-9: 3^6
+        + 2 * 243  // patterns 10-11: 3^5
+        + 2 * 81
+        // patterns 12-13: 3^4
     );
 
 /// Result type for signal handler setup
@@ -761,7 +762,7 @@ impl TrainingEngine {
         // Req 12.2: Use retry logic for checkpoint save
         let mut saved_path: Option<PathBuf> = None;
         let save_result = save_checkpoint_with_retry(|| {
-            let path = checkpoint_mgr.save(game_count, &table, adam, elapsed)?;
+            let path = checkpoint_mgr.save(game_count, &table, adam, &self.patterns, elapsed)?;
             saved_path = Some(path);
             Ok(())
         });
@@ -956,13 +957,18 @@ mod tests {
     fn test_total_pattern_entries_calculation() {
         // Verify the TOTAL_PATTERN_ENTRIES constant is reasonable
         // Expected: 30 stages * sum of 3^k entries
-        let per_stage: u64 = 4 * 59049 + 4 * 6561 + 2 * 2187 + 2 * 729 + 2 * 243;
+        // Pattern k values from patterns.csv: [10,10,10,10,8,8,8,8,6,6,5,5,4,4]
+        let per_stage: u64 = 4 * 59049  // patterns 0-3: 3^10
+            + 4 * 6561  // patterns 4-7: 3^8
+            + 2 * 729   // patterns 8-9: 3^6
+            + 2 * 243   // patterns 10-11: 3^5
+            + 2 * 81; // patterns 12-13: 3^4
         let expected = 30 * per_stage;
         assert_eq!(TOTAL_PATTERN_ENTRIES, expected);
 
-        // Should be around 8.3 million entries (verified by expected value above)
-        assert!(expected > 8_000_000);
-        assert!(expected < 9_000_000);
+        // Should be around 7.9 million entries (264,546 per stage * 30 stages)
+        assert!(expected > 7_000_000);
+        assert!(expected < 8_500_000);
     }
 
     #[test]

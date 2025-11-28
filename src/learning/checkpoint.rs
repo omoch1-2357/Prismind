@@ -104,10 +104,10 @@ impl CheckpointMeta {
 /// let manager = CheckpointManager::new("checkpoints/")?;
 ///
 /// // Save checkpoint
-/// let path = manager.save(100000, &eval_table, &adam, 0)?;
+/// let path = manager.save(100000, &eval_table, &adam, &patterns, 0)?;
 ///
 /// // Load checkpoint
-/// let (table, adam, meta) = manager.load(&path)?;
+/// let (table, adam, meta) = manager.load(&path, &patterns)?;
 /// ```
 pub struct CheckpointManager {
     /// Directory for checkpoint files.
@@ -184,6 +184,7 @@ impl CheckpointManager {
     /// * `game_count` - Number of games completed
     /// * `eval_table` - Evaluation table with pattern weights
     /// * `adam` - Adam optimizer state
+    /// * `patterns` - Pattern definitions for calculating entry counts
     /// * `elapsed_time_secs` - Total elapsed training time
     ///
     /// # Returns
@@ -206,6 +207,7 @@ impl CheckpointManager {
         game_count: u64,
         eval_table: &EvaluationTable,
         adam: &AdamOptimizer,
+        patterns: &[Pattern],
         elapsed_time_secs: u64,
     ) -> Result<PathBuf, LearningError> {
         let checkpoint_path = self.checkpoint_path(game_count);
@@ -225,13 +227,13 @@ impl CheckpointManager {
 
         // Write evaluation table weights
         // Format: for each stage, write all pattern entries as u16 little-endian
-        self.write_eval_table(&mut writer, eval_table)?;
+        self.write_eval_table(&mut writer, eval_table, patterns)?;
 
         // Write Adam first moment (m) vectors
-        self.write_adam_moments(&mut writer, adam.first_moment())?;
+        self.write_adam_moments(&mut writer, adam.first_moment(), patterns)?;
 
         // Write Adam second moment (v) vectors
-        self.write_adam_moments(&mut writer, adam.second_moment())?;
+        self.write_adam_moments(&mut writer, adam.second_moment(), patterns)?;
 
         writer.flush()?;
 
@@ -307,8 +309,8 @@ impl CheckpointManager {
         let mut adam = AdamOptimizer::new(patterns);
         adam.set_timestep(adam_timestep);
 
-        self.read_adam_moments(&mut reader, adam.first_moment_mut())?;
-        self.read_adam_moments(&mut reader, adam.second_moment_mut())?;
+        self.read_adam_moments(&mut reader, adam.first_moment_mut(), patterns)?;
+        self.read_adam_moments(&mut reader, adam.second_moment_mut(), patterns)?;
 
         Ok((eval_table, adam, meta))
     }
@@ -421,18 +423,23 @@ impl CheckpointManager {
     }
 
     /// Write evaluation table to writer.
+    ///
+    /// # Arguments
+    ///
+    /// * `writer` - Writer to write data to
+    /// * `table` - Evaluation table to save
+    /// * `patterns` - Pattern definitions for calculating entry counts
     fn write_eval_table<W: Write>(
         &self,
         writer: &mut W,
         table: &EvaluationTable,
+        patterns: &[Pattern],
     ) -> Result<(), LearningError> {
         // Write all weights: for each stage, for each pattern, for each index
         for stage in 0..NUM_STAGES {
-            // Get the total entries for this stage by checking pattern offsets
-            // We need to iterate through all patterns and their entries
             for pattern_id in 0..NUM_PATTERNS {
-                // Get the number of entries for this pattern
-                let num_entries = Self::get_pattern_entries(pattern_id);
+                // Calculate number of entries dynamically from pattern k value
+                let num_entries = Self::get_pattern_entries(patterns, pattern_id);
                 for index in 0..num_entries {
                     let value = table.get(pattern_id, stage, index);
                     writer.write_all(&value.to_le_bytes())?;
@@ -443,6 +450,11 @@ impl CheckpointManager {
     }
 
     /// Read evaluation table from reader.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - Reader to read data from
+    /// * `patterns` - Pattern definitions for table reconstruction
     fn read_eval_table<R: Read>(
         &self,
         reader: &mut R,
@@ -452,7 +464,8 @@ impl CheckpointManager {
 
         for stage in 0..NUM_STAGES {
             for pattern_id in 0..NUM_PATTERNS {
-                let num_entries = Self::get_pattern_entries(pattern_id);
+                // Calculate number of entries dynamically from pattern k value
+                let num_entries = Self::get_pattern_entries(patterns, pattern_id);
                 for index in 0..num_entries {
                     let mut buf = [0u8; 2];
                     reader.read_exact(&mut buf)?;
@@ -466,14 +479,22 @@ impl CheckpointManager {
     }
 
     /// Write Adam moments to writer.
+    ///
+    /// # Arguments
+    ///
+    /// * `writer` - Writer to write data to
+    /// * `moments` - Adam moments to save
+    /// * `patterns` - Pattern definitions for calculating entry counts
     fn write_adam_moments<W: Write>(
         &self,
         writer: &mut W,
         moments: &crate::learning::adam::AdamMoments,
+        patterns: &[Pattern],
     ) -> Result<(), LearningError> {
         for stage in 0..NUM_STAGES {
             for pattern_id in 0..NUM_PATTERNS {
-                let num_entries = Self::get_pattern_entries(pattern_id);
+                // Calculate number of entries dynamically from pattern k value
+                let num_entries = Self::get_pattern_entries(patterns, pattern_id);
                 for index in 0..num_entries {
                     let value = moments.get(pattern_id, stage, index);
                     writer.write_all(&value.to_le_bytes())?;
@@ -484,14 +505,22 @@ impl CheckpointManager {
     }
 
     /// Read Adam moments from reader.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - Reader to read data from
+    /// * `moments` - Mutable moments storage to populate
+    /// * `patterns` - Pattern definitions for calculating entry counts
     fn read_adam_moments<R: Read>(
         &self,
         reader: &mut R,
         moments: &mut crate::learning::adam::AdamMoments,
+        patterns: &[Pattern],
     ) -> Result<(), LearningError> {
         for stage in 0..NUM_STAGES {
             for pattern_id in 0..NUM_PATTERNS {
-                let num_entries = Self::get_pattern_entries(pattern_id);
+                // Calculate number of entries dynamically from pattern k value
+                let num_entries = Self::get_pattern_entries(patterns, pattern_id);
                 for index in 0..num_entries {
                     let mut buf = [0u8; 4];
                     reader.read_exact(&mut buf)?;
@@ -505,21 +534,29 @@ impl CheckpointManager {
 
     /// Get number of entries for a pattern.
     ///
-    /// Pattern sizes based on k values:
-    /// - Patterns 0-3: k=10, 3^10 = 59049 entries
-    /// - Patterns 4-7: k=8, 3^8 = 6561 entries
-    /// - Patterns 8-9: k=7, 3^7 = 2187 entries
-    /// - Patterns 10-11: k=6, 3^6 = 729 entries
-    /// - Patterns 12-13: k=5, 3^5 = 243 entries
-    fn get_pattern_entries(pattern_id: usize) -> usize {
-        match pattern_id {
-            0..=3 => 59049, // 3^10
-            4..=7 => 6561,  // 3^8
-            8..=9 => 2187,  // 3^7
-            10..=11 => 729, // 3^6
-            12..=13 => 243, // 3^5
-            _ => panic!("Invalid pattern_id: {}", pattern_id),
-        }
+    /// Calculates entry count dynamically from pattern k value using 3^k formula.
+    /// This ensures correctness even if pattern configuration changes.
+    ///
+    /// # Arguments
+    ///
+    /// * `patterns` - Pattern definitions array
+    /// * `pattern_id` - Pattern ID (0-13)
+    ///
+    /// # Returns
+    ///
+    /// Number of entries (3^k where k is the pattern's cell count)
+    ///
+    /// # Panics
+    ///
+    /// Panics if pattern_id is out of bounds.
+    fn get_pattern_entries(patterns: &[Pattern], pattern_id: usize) -> usize {
+        assert!(
+            pattern_id < patterns.len(),
+            "pattern_id {} out of bounds (patterns.len = {})",
+            pattern_id,
+            patterns.len()
+        );
+        3_usize.pow(patterns[pattern_id].k as u32)
     }
 
     /// Get the checkpoint directory path.
@@ -545,12 +582,12 @@ mod tests {
             Pattern::new(5, 8, vec![0, 8, 16, 24, 32, 40, 48, 56]).unwrap(),
             Pattern::new(6, 8, vec![0, 9, 18, 27, 36, 45, 54, 63]).unwrap(),
             Pattern::new(7, 8, vec![7, 14, 21, 28, 35, 42, 49, 56]).unwrap(),
-            Pattern::new(8, 7, vec![0, 1, 2, 3, 4, 5, 6]).unwrap(),
-            Pattern::new(9, 7, vec![0, 8, 16, 24, 32, 40, 48]).unwrap(),
-            Pattern::new(10, 6, vec![0, 1, 2, 3, 4, 5]).unwrap(),
-            Pattern::new(11, 6, vec![0, 8, 16, 24, 32, 40]).unwrap(),
-            Pattern::new(12, 5, vec![0, 1, 2, 3, 4]).unwrap(),
-            Pattern::new(13, 5, vec![0, 8, 16, 24, 32]).unwrap(),
+            Pattern::new(8, 6, vec![0, 1, 2, 3, 4, 5]).unwrap(),
+            Pattern::new(9, 6, vec![0, 8, 16, 24, 32, 40]).unwrap(),
+            Pattern::new(10, 5, vec![0, 1, 2, 3, 4]).unwrap(),
+            Pattern::new(11, 5, vec![0, 8, 16, 24, 32]).unwrap(),
+            Pattern::new(12, 4, vec![0, 1, 2, 3]).unwrap(),
+            Pattern::new(13, 4, vec![0, 8, 16, 24]).unwrap(),
         ]
     }
 
@@ -620,7 +657,7 @@ mod tests {
         let adam = AdamOptimizer::new(&patterns);
 
         // Save initial checkpoint (game_count = 0)
-        let path = manager.save(0, &table, &adam, 0).unwrap();
+        let path = manager.save(0, &table, &adam, &patterns, 0).unwrap();
 
         assert!(path.exists());
         assert_eq!(
@@ -647,7 +684,9 @@ mod tests {
         adam.step();
 
         // Save checkpoint
-        let path = manager.save(100000, &table, &adam, 3600).unwrap();
+        let path = manager
+            .save(100000, &table, &adam, &patterns, 3600)
+            .unwrap();
 
         // Load checkpoint
         let (loaded_table, loaded_adam, meta) = manager.load(&path, &patterns).unwrap();
@@ -696,7 +735,9 @@ mod tests {
         adam.step();
 
         // Save and reload
-        manager.save(200000, &table, &adam, 7200).unwrap();
+        manager
+            .save(200000, &table, &adam, &patterns, 7200)
+            .unwrap();
         let path = manager.checkpoint_path(200000);
         let (loaded_table, loaded_adam, meta) = manager.load(&path, &patterns).unwrap();
 
@@ -730,7 +771,9 @@ mod tests {
         let table = EvaluationTable::new(&patterns);
         let adam = AdamOptimizer::new(&patterns);
 
-        let path = manager.save(100000, &table, &adam, 3600).unwrap();
+        let path = manager
+            .save(100000, &table, &adam, &patterns, 3600)
+            .unwrap();
 
         // Verify should succeed
         let meta = manager.verify(&path).unwrap();
@@ -798,7 +841,7 @@ mod tests {
         let table = EvaluationTable::new(&patterns);
         let adam = AdamOptimizer::new(&patterns);
 
-        manager.save(100000, &table, &adam, 0).unwrap();
+        manager.save(100000, &table, &adam, &patterns, 0).unwrap();
 
         let latest = manager.find_latest().unwrap().unwrap();
         assert!(
@@ -821,9 +864,9 @@ mod tests {
         let adam = AdamOptimizer::new(&patterns);
 
         // Save multiple checkpoints
-        manager.save(100000, &table, &adam, 0).unwrap();
-        manager.save(200000, &table, &adam, 0).unwrap();
-        manager.save(300000, &table, &adam, 0).unwrap();
+        manager.save(100000, &table, &adam, &patterns, 0).unwrap();
+        manager.save(200000, &table, &adam, &patterns, 0).unwrap();
+        manager.save(300000, &table, &adam, &patterns, 0).unwrap();
 
         let latest = manager.find_latest().unwrap().unwrap();
         assert!(
@@ -888,7 +931,9 @@ mod tests {
         println!("  6.6: Filename format checkpoint_NNNNNN.bin");
 
         // Save checkpoint
-        let path = manager.save(100000, &table, &adam, 3600).unwrap();
+        let path = manager
+            .save(100000, &table, &adam, &patterns, 3600)
+            .unwrap();
         assert!(path.exists());
 
         // Req 6.7: Load checkpoint
@@ -910,7 +955,7 @@ mod tests {
         println!("  6.9: Return error on corruption or version mismatch");
 
         // Req 6.10: Initial checkpoint
-        let initial_path = manager.save(0, &table, &adam, 0).unwrap();
+        let initial_path = manager.save(0, &table, &adam, &patterns, 0).unwrap();
         assert!(initial_path.exists());
         assert!(
             initial_path
