@@ -1,7 +1,7 @@
 //! SharedEvaluator: Thread-safe evaluator wrapper for Phase 3 learning.
 //!
 //! This module provides a thread-safe wrapper around EvaluationTable using
-//! Arc<RwLock> for concurrent read access during parallel game execution
+//! `Arc<RwLock>` for concurrent read access during parallel game execution
 //! and exclusive write access during TD weight updates.
 //!
 //! # Architecture
@@ -47,7 +47,7 @@ pub const NUM_PATTERN_INSTANCES: usize = 56;
 
 /// Thread-safe evaluator wrapper for concurrent read/write access.
 ///
-/// Wraps EvaluationTable with Arc<RwLock> to allow:
+/// Wraps EvaluationTable with `Arc<RwLock>` to allow:
 /// - Multiple concurrent reads during parallel game execution
 /// - Exclusive writes during TD weight updates
 ///
@@ -74,7 +74,7 @@ pub const NUM_PATTERN_INSTANCES: usize = 56;
 /// across threads safely.
 #[derive(Debug)]
 pub struct SharedEvaluator {
-    /// Thread-safe evaluation table wrapped in Arc<RwLock>
+    /// Thread-safe evaluation table wrapped in `Arc<RwLock>`
     table: Arc<RwLock<EvaluationTable>>,
     /// Pattern definitions for pattern extraction
     patterns: [Pattern; 14],
@@ -259,7 +259,7 @@ impl SharedEvaluator {
     ///
     /// # Returns
     ///
-    /// Clone of the Arc<RwLock<EvaluationTable>>
+    /// Clone of the `Arc<RwLock<EvaluationTable>>`
     pub fn table_arc(&self) -> Arc<RwLock<EvaluationTable>> {
         Arc::clone(&self.table)
     }

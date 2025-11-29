@@ -51,11 +51,11 @@ pub const NUM_PATTERNS: usize = 14;
 
 /// Moment storage in Structure of Arrays (SoA) format.
 ///
-/// Matches the EvaluationTable layout: [stage][flat_array]
+/// Matches the EvaluationTable layout: \[stage\]\[flat_array\]
 /// where flat_array contains all pattern entries concatenated.
 #[derive(Debug, Clone)]
 pub struct AdamMoments {
-    /// [stage][flat_array] of moment values
+    /// \[stage\]\[flat_array\] of moment values
     data: Vec<Box<[f32]>>,
     /// Offset for each pattern within the flat array
     pattern_offsets: [usize; NUM_PATTERNS],

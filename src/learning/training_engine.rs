@@ -69,7 +69,7 @@ pub const MAX_MEMORY_BUDGET: usize = 600 * 1024 * 1024;
 
 /// Total pattern entries for convergence monitoring.
 /// Calculated as sum of 3^k for all 14 patterns across 30 stages.
-/// Pattern k values from patterns.csv: [10,10,10,10,8,8,8,8,6,6,5,5,4,4]
+/// Pattern k values from patterns.csv: \[10,10,10,10,8,8,8,8,6,6,5,5,4,4\]
 pub const TOTAL_PATTERN_ENTRIES: u64 = 30
     * (
         4 * 59049  // patterns 0-3: 3^10
@@ -85,17 +85,17 @@ type SignalHandlerResult = Result<Arc<AtomicBool>, String>;
 
 /// Global interrupt flag shared by all TrainingEngine instances.
 /// This allows the signal handler to be registered only once per process.
-/// We use a Mutex<Option<SignalHandlerResult>> to handle the Result properly.
+/// We use a `Mutex<Option<SignalHandlerResult>>` to handle the Result properly.
 static GLOBAL_INTERRUPTED: OnceLock<Mutex<SignalHandlerResult>> = OnceLock::new();
 
 /// Setup the global signal handler.
 ///
 /// This function is safe to call multiple times - it will only register
-/// the handler once. Subsequent calls will return the same Arc<AtomicBool>.
+/// the handler once. Subsequent calls will return the same `Arc<AtomicBool>`.
 ///
 /// # Returns
 ///
-/// Arc<AtomicBool> that will be set to true when SIGINT/SIGTERM is received.
+/// `Arc<AtomicBool>` that will be set to true when SIGINT/SIGTERM is received.
 fn setup_signal_handler() -> Result<Arc<AtomicBool>, LearningError> {
     let result_mutex = GLOBAL_INTERRUPTED.get_or_init(|| {
         let flag = Arc::new(AtomicBool::new(false));

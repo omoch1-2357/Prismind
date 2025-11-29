@@ -15,7 +15,7 @@
 //!
 //! For each position t (iterating backwards from T-1 to 0):
 //! 1. Compute target: lambda * final_score + (1 - lambda) * next_value
-//! 2. Compute TD error: target - leaf_value[t]
+//! 2. Compute TD error: target - leaf_value\[t\]
 //! 3. For each pattern entry visited at t:
 //!    - Compute gradient: td_error * eligibility_trace
 //!    - Update weight using Adam optimizer
@@ -167,7 +167,7 @@ impl TDLearner {
     /// 1. Initialize next_value = final_score (for the last move)
     /// 2. For each move t from T-1 to 0 (reverse order):
     ///    - a. Compute target value based on position in sequence
-    ///    - b. Compute TD error = target - leaf_value[t]
+    ///    - b. Compute TD error = target - leaf_value\[t\]
     ///    - c. For each of 56 pattern instances:
     ///      - Compute gradient = td_error * eligibility_trace
     ///      - Update weight using Adam optimizer
