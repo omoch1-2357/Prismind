@@ -75,7 +75,10 @@ pub use benchmark::{
     NUM_THREADS, SearchBenchmark, TARGET_GAMES_PER_SEC, TARGET_SEARCH_TIME_MS, TARGET_TOTAL_GAMES,
     TARGET_TRAINING_HOURS, TDUpdateBenchmark, TrainingTimeEstimator,
 };
-pub use checkpoint::{CHECKPOINT_MAGIC, CheckpointManager, CheckpointMeta};
+pub use checkpoint::{
+    CHECKPOINT_MAGIC, CHECKPOINT_MAGIC_V2, CHECKPOINT_VERSION, CheckpointHeader, CheckpointManager,
+    CheckpointMeta, EnhancedCheckpointManager, FLAG_COMPRESSED,
+};
 pub use convergence::{
     CONVERGENCE_REPORT_INTERVAL, ConvergenceMetrics, ConvergenceMonitor, IMPROVEMENT_THRESHOLD,
     MIN_WIN_RATE_VS_RANDOM, RUNNING_AVERAGE_WINDOW, STAGNATION_WINDOW, TARGET_UPDATES_PER_ENTRY,

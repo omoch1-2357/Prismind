@@ -10,6 +10,7 @@
 //! - [`PyEvaluator`] - Board evaluation using pattern tables
 //! - [`PyTrainingManager`] - Training session control with pause/resume
 //! - [`PyCheckpointManager`] - Checkpoint save/load with integrity verification
+//! - [`PyLearningState`] - Training state container for checkpoint operations
 //! - [`PyStatisticsManager`] - Statistics and monitoring aggregation
 //! - [`PyDebugModule`] - Debugging and diagnostic utilities
 //!
@@ -33,10 +34,16 @@ use pyo3::prelude::*;
 mod evaluator;
 
 #[cfg(feature = "pyo3")]
+mod checkpoint_manager;
+
+#[cfg(feature = "pyo3")]
 pub use evaluator::PyEvaluator;
 
-// Placeholder types for future implementation (Tasks 3, 6, 8, 10)
-// These will be implemented in subsequent tasks
+#[cfg(feature = "pyo3")]
+pub use checkpoint_manager::{PyCheckpointManager, PyLearningState};
+
+// Placeholder types for future implementation (Tasks 6, 8, 10)
+// PyCheckpointManager is now fully implemented in checkpoint_manager.rs
 
 /// PyO3 module entry point for the Prismind Python extension.
 ///
@@ -48,10 +55,13 @@ fn _prismind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register PyEvaluator class
     m.add_class::<PyEvaluator>()?;
 
+    // Register PyCheckpointManager and PyLearningState (Task 3.6 - implemented)
+    m.add_class::<PyCheckpointManager>()?;
+    m.add_class::<PyLearningState>()?;
+
     // Register placeholder classes (implemented as simple PyO3 classes)
     // These will be fully implemented in subsequent tasks
     m.add_class::<PyTrainingManager>()?;
-    m.add_class::<PyCheckpointManager>()?;
     m.add_class::<PyStatisticsManager>()?;
     m.add_class::<PyDebugModule>()?;
 
@@ -89,35 +99,6 @@ impl PyTrainingManager {
     /// Get current training state.
     pub fn get_state(&self) -> String {
         "idle".to_string()
-    }
-}
-
-/// Checkpoint manager for saving and loading training state.
-///
-/// Supports atomic saves, CRC32 verification, and configurable retention.
-#[cfg(feature = "pyo3")]
-#[pyclass]
-pub struct PyCheckpointManager {
-    // Will be implemented in Task 3.6
-}
-
-#[cfg(feature = "pyo3")]
-#[pymethods]
-impl PyCheckpointManager {
-    /// Create a new checkpoint manager.
-    #[new]
-    #[pyo3(signature = (_checkpoint_dir="checkpoints", _retention_count=5, _compression_enabled=false))]
-    pub fn new(
-        _checkpoint_dir: &str,
-        _retention_count: usize,
-        _compression_enabled: bool,
-    ) -> PyResult<Self> {
-        Ok(Self {})
-    }
-
-    /// List available checkpoints.
-    pub fn list_checkpoints(&self) -> PyResult<Vec<(String, u64, String, u64)>> {
-        Ok(vec![])
     }
 }
 
@@ -204,6 +185,7 @@ mod tests {
         let _ = std::any::type_name::<PyEvaluator>();
         let _ = std::any::type_name::<PyTrainingManager>();
         let _ = std::any::type_name::<PyCheckpointManager>();
+        let _ = std::any::type_name::<PyLearningState>();
         let _ = std::any::type_name::<PyStatisticsManager>();
         let _ = std::any::type_name::<PyDebugModule>();
     }

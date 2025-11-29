@@ -49,7 +49,7 @@
 
 ## Task 3. Enhanced Checkpoint Manager
 
-- [ ] 3.1 Implement checkpoint header format with version and integrity
+- [x] 3.1 Implement checkpoint header format with version and integrity
   - Define CheckpointHeader structure with magic bytes ("PRSM"), version number, and flags
   - Add CRC32 checksum field for data integrity verification
   - Include games_completed and timestamp in header for metadata
@@ -57,35 +57,35 @@
   - Note: Design review issue - document version migration strategy for future format changes
   - _Requirements: 3.3, 3.4_
 
-- [ ] 3.2 Implement atomic checkpoint save with write-to-temp-then-rename
+- [x] 3.2 Implement atomic checkpoint save with write-to-temp-then-rename
   - Serialize training state (pattern tables, Adam optimizer state, metadata) using bincode
   - Write to temporary file first to prevent partial writes
   - Rename temporary file to final checkpoint path atomically
   - Log checkpoint operations with file size, save duration, and storage location
   - _Requirements: 3.1, 3.2, 3.10_
 
-- [ ] 3.3 Add CRC32 checksum calculation and verification
+- [x] 3.3 Add CRC32 checksum calculation and verification
   - Calculate CRC32 checksum of serialized data before writing
   - Store checksum in checkpoint header
   - Verify checksum on load and return corruption error on mismatch
   - Use crc32fast library for efficient checksum computation
   - _Requirements: 3.7, 3.8_
 
-- [ ] 3.4 (P) Implement optional checkpoint compression
+- [x] 3.4 (P) Implement optional checkpoint compression
   - Add configurable compression using flate2 library
   - Set compression flag in checkpoint header when enabled
   - Decompress data during load when compression flag is set
   - Balance compression ratio against CPU overhead for save performance
   - _Requirements: 3.9_
 
-- [ ] 3.5 Implement checkpoint retention policy
+- [x] 3.5 Implement checkpoint retention policy
   - Track checkpoint files in directory by timestamp
   - Implement configurable retention count (default: 5 checkpoints)
   - Automatically delete oldest checkpoints when count exceeds limit
   - Apply retention policy after each successful save operation
   - _Requirements: 3.5, 3.6_
 
-- [ ] 3.6 Create PyCheckpointManager PyO3 wrapper
+- [x] 3.6 Create PyCheckpointManager PyO3 wrapper
   - Wrap CheckpointManager for Python access with constructor accepting directory, retention count, compression flag
   - Implement save method returning tuple of (path, file_size_bytes, save_duration_secs)
   - Implement load method returning training state as Python dictionary

@@ -3,7 +3,9 @@
 //! This module implements checkpoint management for saving and loading
 //! complete training state, enabling fault tolerance and training resumption.
 //!
-//! # Binary Format
+//! # Binary Formats
+//!
+//! ## V1 Format (Legacy)
 //!
 //! | Offset | Size | Field | Description |
 //! |--------|------|-------|-------------|
@@ -15,6 +17,20 @@
 //! | 56 | ~57 MB | eval_table | Raw u16 array |
 //! | ~57 MB | ~114 MB | adam_m | Raw f32 array |
 //! | ~171 MB | ~114 MB | adam_v | Raw f32 array |
+//!
+//! ## V2 Format (Enhanced - Phase 4)
+//!
+//! | Offset | Size | Field | Description |
+//! |--------|------|-------|-------------|
+//! | 0 | 4 | magic | "PRSM" |
+//! | 4 | 4 | version | u32 (current: 2) |
+//! | 8 | 4 | flags | bit 0: compressed |
+//! | 12 | 4 | checksum | CRC32 of data |
+//! | 16 | 8 | games_completed | u64 little-endian |
+//! | 24 | 8 | timestamp | i64 Unix timestamp |
+//! | 32 | 8 | elapsed_secs | u64 little-endian |
+//! | 40 | 8 | adam_timestep | u64 little-endian |
+//! | 48 | ~285 MB | data | Pattern tables + Adam state (optionally compressed) |
 //!
 //! # Requirements Coverage
 //!
@@ -28,28 +44,62 @@
 //! - Req 6.8: Verify checkpoint integrity with header signature
 //! - Req 6.9: Report error on corruption, allow fresh start
 //! - Req 6.10: Support initial checkpoint_000000.bin
+//!
+//! ## Phase 4 Enhanced Requirements
+//!
+//! - Req 3.1: Atomic save with write-to-temp-then-rename
+//! - Req 3.3: Version header for format validation
+//! - Req 3.4: Version mismatch returns error with details
+//! - Req 3.5: Configurable checkpoint retention
+//! - Req 3.6: Automatic deletion of old checkpoints
+//! - Req 3.7: CRC32 checksum for data integrity
+//! - Req 3.8: Corruption detection via checksum mismatch
+//! - Req 3.9: Optional compression via flate2
+//! - Req 3.10: Log checkpoint operations with stats
 
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+use crc32fast::Hasher as Crc32Hasher;
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 
 use crate::evaluator::EvaluationTable;
 use crate::learning::LearningError;
 use crate::learning::adam::AdamOptimizer;
 use crate::pattern::Pattern;
 
-/// 24-byte magic header for checkpoint verification.
+/// 24-byte magic header for checkpoint verification (V1 legacy format).
 ///
-/// This header is used to verify that a file is a valid checkpoint
+/// This header is used to verify that a file is a valid V1 checkpoint
 /// and to check version compatibility.
 pub const CHECKPOINT_MAGIC: &[u8; 24] = b"OTHELLO_AI_CHECKPOINT_V1";
+
+/// 4-byte magic header for V2 format ("PRSM").
+///
+/// Used by `EnhancedCheckpointManager` for the new checkpoint format
+/// with CRC32 integrity and optional compression.
+pub const CHECKPOINT_MAGIC_V2: &[u8; 4] = b"PRSM";
+
+/// Current checkpoint format version.
+///
+/// Version 2 supports CRC32 checksums and optional compression.
+pub const CHECKPOINT_VERSION: u32 = 2;
+
+/// Flag bit indicating compression is enabled.
+pub const FLAG_COMPRESSED: u32 = 1;
 
 /// Number of patterns in the Othello AI system.
 pub const NUM_PATTERNS: usize = 14;
 
 /// Number of stages in the evaluation table.
 pub const NUM_STAGES: usize = 30;
+
+/// Default retention count for checkpoints.
+pub const DEFAULT_RETENTION_COUNT: usize = 5;
 
 /// Checkpoint metadata containing training state information.
 ///
@@ -86,6 +136,139 @@ impl CheckpointMeta {
             adam_timestep,
             created_at,
         }
+    }
+}
+
+/// V2 Checkpoint header with version, flags, and CRC32 checksum.
+///
+/// This header is used by `EnhancedCheckpointManager` and provides:
+/// - Magic bytes for format identification
+/// - Version number for compatibility checking
+/// - Flags for compression status
+/// - CRC32 checksum for data integrity
+///
+/// # Binary Format (32 bytes)
+///
+/// | Offset | Size | Field |
+/// |--------|------|-------|
+/// | 0 | 4 | magic ("PRSM") |
+/// | 4 | 4 | version (u32) |
+/// | 8 | 4 | flags (u32) |
+/// | 12 | 4 | checksum (u32) |
+/// | 16 | 8 | games_completed (u64) |
+/// | 24 | 8 | timestamp (i64) |
+#[derive(Clone, Debug, PartialEq)]
+pub struct CheckpointHeader {
+    /// Magic bytes for format identification ("PRSM").
+    pub magic: [u8; 4],
+    /// Format version number.
+    pub version: u32,
+    /// Flags (bit 0: compressed).
+    pub flags: u32,
+    /// CRC32 checksum of the data section.
+    pub checksum: u32,
+    /// Number of games completed at checkpoint time.
+    pub games_completed: u64,
+    /// Unix timestamp when checkpoint was created.
+    pub timestamp: i64,
+}
+
+impl CheckpointHeader {
+    /// Header size in bytes.
+    pub const SIZE: usize = 32;
+
+    /// Create a new checkpoint header.
+    ///
+    /// # Arguments
+    ///
+    /// * `games_completed` - Number of games completed
+    /// * `compressed` - Whether data will be compressed
+    pub fn new(games_completed: u64, compressed: bool) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        let flags = if compressed { FLAG_COMPRESSED } else { 0 };
+
+        Self {
+            magic: *CHECKPOINT_MAGIC_V2,
+            version: CHECKPOINT_VERSION,
+            flags,
+            checksum: 0, // Set during save after data serialization
+            games_completed,
+            timestamp,
+        }
+    }
+
+    /// Set the CRC32 checksum.
+    pub fn set_checksum(&mut self, checksum: u32) {
+        self.checksum = checksum;
+    }
+
+    /// Check if compression flag is set.
+    pub fn is_compressed(&self) -> bool {
+        self.flags & FLAG_COMPRESSED != 0
+    }
+
+    /// Serialize header to bytes.
+    pub fn to_bytes(&self) -> [u8; Self::SIZE] {
+        let mut bytes = [0u8; Self::SIZE];
+        bytes[0..4].copy_from_slice(&self.magic);
+        bytes[4..8].copy_from_slice(&self.version.to_le_bytes());
+        bytes[8..12].copy_from_slice(&self.flags.to_le_bytes());
+        bytes[12..16].copy_from_slice(&self.checksum.to_le_bytes());
+        bytes[16..24].copy_from_slice(&self.games_completed.to_le_bytes());
+        bytes[24..32].copy_from_slice(&self.timestamp.to_le_bytes());
+        bytes
+    }
+
+    /// Deserialize header from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if magic bytes don't match or version is incompatible.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, LearningError> {
+        if bytes.len() < Self::SIZE {
+            return Err(LearningError::InvalidCheckpoint(format!(
+                "Header too small: expected {} bytes, got {}",
+                Self::SIZE,
+                bytes.len()
+            )));
+        }
+
+        let mut magic = [0u8; 4];
+        magic.copy_from_slice(&bytes[0..4]);
+
+        if &magic != CHECKPOINT_MAGIC_V2 {
+            return Err(LearningError::InvalidCheckpoint(format!(
+                "Invalid magic header: expected {:?}, got {:?}",
+                CHECKPOINT_MAGIC_V2, magic
+            )));
+        }
+
+        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        if version != CHECKPOINT_VERSION {
+            return Err(LearningError::InvalidCheckpoint(format!(
+                "Incompatible checkpoint version: expected {}, got {}. \
+                 This checkpoint was created with a different version of the software.",
+                CHECKPOINT_VERSION, version
+            )));
+        }
+
+        let flags = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+        let checksum = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+        let games_completed = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
+        let timestamp = i64::from_le_bytes(bytes[24..32].try_into().unwrap());
+
+        Ok(Self {
+            magic,
+            version,
+            flags,
+            checksum,
+            games_completed,
+            timestamp,
+        })
     }
 }
 
@@ -554,6 +737,529 @@ impl CheckpointManager {
     /// # Panics
     ///
     /// Panics if pattern_id is out of bounds.
+    fn get_pattern_entries(patterns: &[Pattern], pattern_id: usize) -> usize {
+        assert!(
+            pattern_id < patterns.len(),
+            "pattern_id {} out of bounds (patterns.len = {})",
+            pattern_id,
+            patterns.len()
+        );
+        3_usize.pow(patterns[pattern_id].k as u32)
+    }
+
+    /// Get the checkpoint directory path.
+    pub fn checkpoint_dir(&self) -> &Path {
+        &self.checkpoint_dir
+    }
+}
+
+// ============================================================================
+// Enhanced Checkpoint Manager (Phase 4)
+// ============================================================================
+
+/// Enhanced checkpoint manager with CRC32 integrity, compression, and retention.
+///
+/// This manager provides production-ready checkpoint functionality with:
+/// - Atomic saves using write-to-temp-then-rename
+/// - CRC32 checksum for data integrity verification
+/// - Optional gzip compression to reduce storage
+/// - Configurable retention policy (keep last N checkpoints)
+///
+/// # Example
+///
+/// ```ignore
+/// use prismind::learning::checkpoint::EnhancedCheckpointManager;
+///
+/// let manager = EnhancedCheckpointManager::new("checkpoints/", 5, true)?;
+///
+/// // Save with compression and integrity checking
+/// let (path, size, duration) = manager.save(100000, &table, &adam, &patterns, 3600)?;
+///
+/// // Verify integrity
+/// assert!(manager.verify(&path)?);
+///
+/// // Load checkpoint
+/// let (table, adam, meta) = manager.load(&path, &patterns)?;
+/// ```
+pub struct EnhancedCheckpointManager {
+    /// Directory for checkpoint files.
+    checkpoint_dir: PathBuf,
+    /// Number of checkpoints to retain.
+    retention_count: usize,
+    /// Whether to compress checkpoint data.
+    compression_enabled: bool,
+}
+
+impl EnhancedCheckpointManager {
+    /// Create a new enhanced checkpoint manager.
+    ///
+    /// Creates the checkpoint directory if it doesn't exist.
+    ///
+    /// # Arguments
+    ///
+    /// * `checkpoint_dir` - Path to checkpoint directory
+    /// * `retention_count` - Number of checkpoints to keep (default: 5)
+    /// * `compression_enabled` - Whether to compress checkpoints
+    ///
+    /// # Returns
+    ///
+    /// Result containing the manager or an error.
+    pub fn new<P: AsRef<Path>>(
+        checkpoint_dir: P,
+        retention_count: usize,
+        compression_enabled: bool,
+    ) -> Result<Self, LearningError> {
+        let checkpoint_dir = checkpoint_dir.as_ref().to_path_buf();
+
+        // Create directory if it doesn't exist
+        if !checkpoint_dir.exists() {
+            fs::create_dir_all(&checkpoint_dir)?;
+        }
+
+        Ok(Self {
+            checkpoint_dir,
+            retention_count,
+            compression_enabled,
+        })
+    }
+
+    /// Get the current retention count.
+    pub fn retention_count(&self) -> usize {
+        self.retention_count
+    }
+
+    /// Set the retention count.
+    pub fn set_retention(&mut self, count: usize) {
+        self.retention_count = count;
+    }
+
+    /// Check if compression is enabled.
+    pub fn compression_enabled(&self) -> bool {
+        self.compression_enabled
+    }
+
+    /// Enable or disable compression.
+    pub fn set_compression(&mut self, enabled: bool) {
+        self.compression_enabled = enabled;
+    }
+
+    /// Generate checkpoint filename for a given game count.
+    pub fn checkpoint_filename(game_count: u64) -> String {
+        format!("checkpoint_{:06}.bin", game_count)
+    }
+
+    /// Get full path for a checkpoint file.
+    pub fn checkpoint_path(&self, game_count: u64) -> PathBuf {
+        self.checkpoint_dir
+            .join(Self::checkpoint_filename(game_count))
+    }
+
+    /// Save checkpoint with CRC32 integrity and optional compression.
+    ///
+    /// Uses atomic write (write-to-temp-then-rename) to prevent corruption.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_count` - Number of games completed
+    /// * `eval_table` - Evaluation table with pattern weights
+    /// * `adam` - Adam optimizer state
+    /// * `patterns` - Pattern definitions
+    /// * `elapsed_time_secs` - Total elapsed training time
+    ///
+    /// # Returns
+    ///
+    /// Tuple of (path, file_size_bytes, save_duration_secs).
+    pub fn save(
+        &self,
+        game_count: u64,
+        eval_table: &EvaluationTable,
+        adam: &AdamOptimizer,
+        patterns: &[Pattern],
+        elapsed_time_secs: u64,
+    ) -> Result<(PathBuf, u64, f64), LearningError> {
+        let start_time = Instant::now();
+        let checkpoint_path = self.checkpoint_path(game_count);
+        let temp_path = checkpoint_path.with_extension("tmp");
+
+        // Serialize data to buffer
+        let mut data_buffer = Vec::new();
+
+        // Write elapsed_time_secs and adam_timestep to data buffer
+        data_buffer.extend_from_slice(&elapsed_time_secs.to_le_bytes());
+        data_buffer.extend_from_slice(&adam.timestep().to_le_bytes());
+
+        // Write evaluation table
+        self.write_eval_table_to_buffer(&mut data_buffer, eval_table, patterns)?;
+
+        // Write Adam moments
+        self.write_adam_moments_to_buffer(&mut data_buffer, adam.first_moment(), patterns)?;
+        self.write_adam_moments_to_buffer(&mut data_buffer, adam.second_moment(), patterns)?;
+
+        // Optionally compress data
+        let final_data = if self.compression_enabled {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+            encoder.write_all(&data_buffer)?;
+            encoder.finish()?
+        } else {
+            data_buffer
+        };
+
+        // Calculate CRC32 checksum of the final data
+        let mut hasher = Crc32Hasher::new();
+        hasher.update(&final_data);
+        let checksum = hasher.finalize();
+
+        // Create header with checksum
+        let mut header = CheckpointHeader::new(game_count, self.compression_enabled);
+        header.set_checksum(checksum);
+
+        // Write to temp file
+        let file = File::create(&temp_path)?;
+        let mut writer = BufWriter::new(file);
+        writer.write_all(&header.to_bytes())?;
+        writer.write_all(&final_data)?;
+        writer.flush()?;
+        drop(writer);
+
+        // Atomic rename
+        fs::rename(&temp_path, &checkpoint_path)?;
+
+        // Get file size
+        let file_size = fs::metadata(&checkpoint_path)?.len();
+
+        // Apply retention policy
+        self.apply_retention()?;
+
+        let duration = start_time.elapsed().as_secs_f64();
+
+        // Log checkpoint operation
+        log::info!(
+            "Checkpoint saved: {} ({} bytes, {:.2}s, compression: {})",
+            checkpoint_path.display(),
+            file_size,
+            duration,
+            self.compression_enabled
+        );
+
+        Ok((checkpoint_path, file_size, duration))
+    }
+
+    /// Load checkpoint with CRC32 verification.
+    ///
+    /// # Arguments
+    ///
+    /// * `checkpoint_path` - Path to checkpoint file
+    /// * `patterns` - Pattern definitions
+    ///
+    /// # Returns
+    ///
+    /// Tuple of (EvaluationTable, AdamOptimizer, CheckpointMeta).
+    pub fn load(
+        &self,
+        checkpoint_path: &Path,
+        patterns: &[Pattern],
+    ) -> Result<(EvaluationTable, AdamOptimizer, CheckpointMeta), LearningError> {
+        let file = File::open(checkpoint_path)?;
+        let mut reader = BufReader::new(file);
+
+        // Read header
+        let mut header_bytes = [0u8; CheckpointHeader::SIZE];
+        reader.read_exact(&mut header_bytes)?;
+        let header = CheckpointHeader::from_bytes(&header_bytes)?;
+
+        // Read data
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+
+        // Verify checksum
+        let mut hasher = Crc32Hasher::new();
+        hasher.update(&data);
+        let computed_checksum = hasher.finalize();
+
+        if computed_checksum != header.checksum {
+            return Err(LearningError::InvalidCheckpoint(format!(
+                "Checksum mismatch: expected {:#010x}, computed {:#010x}. Data may be corrupted.",
+                header.checksum, computed_checksum
+            )));
+        }
+
+        // Decompress if needed
+        let decompressed_data = if header.is_compressed() {
+            let mut decoder = GzDecoder::new(Cursor::new(data));
+            let mut decompressed = Vec::new();
+            decoder.read_to_end(&mut decompressed)?;
+            decompressed
+        } else {
+            data
+        };
+
+        // Parse data
+        let mut cursor = Cursor::new(decompressed_data);
+
+        // Read elapsed_time_secs and adam_timestep
+        let mut buf8 = [0u8; 8];
+        cursor.read_exact(&mut buf8)?;
+        let elapsed_time_secs = u64::from_le_bytes(buf8);
+
+        cursor.read_exact(&mut buf8)?;
+        let adam_timestep = u64::from_le_bytes(buf8);
+
+        // Read evaluation table
+        let eval_table = self.read_eval_table_from_reader(&mut cursor, patterns)?;
+
+        // Read Adam optimizer
+        let mut adam = AdamOptimizer::new(patterns);
+        adam.set_timestep(adam_timestep);
+        self.read_adam_moments_from_reader(&mut cursor, adam.first_moment_mut(), patterns)?;
+        self.read_adam_moments_from_reader(&mut cursor, adam.second_moment_mut(), patterns)?;
+
+        let meta = CheckpointMeta {
+            game_count: header.games_completed,
+            elapsed_time_secs,
+            adam_timestep,
+            created_at: header.timestamp as u64,
+        };
+
+        Ok((eval_table, adam, meta))
+    }
+
+    /// Load the latest checkpoint in the directory.
+    ///
+    /// # Returns
+    ///
+    /// Optional tuple of (EvaluationTable, AdamOptimizer, CheckpointMeta).
+    pub fn load_latest(
+        &self,
+        patterns: &[Pattern],
+    ) -> Result<Option<(EvaluationTable, AdamOptimizer, CheckpointMeta)>, LearningError> {
+        if let Some(latest_path) = self.find_latest()? {
+            Ok(Some(self.load(&latest_path, patterns)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Verify checkpoint integrity without full load.
+    ///
+    /// Reads and verifies the header and CRC32 checksum.
+    ///
+    /// # Returns
+    ///
+    /// True if checkpoint is valid, false otherwise.
+    pub fn verify(&self, checkpoint_path: &Path) -> Result<bool, LearningError> {
+        let file = File::open(checkpoint_path)?;
+        let mut reader = BufReader::new(file);
+
+        // Read header
+        let mut header_bytes = [0u8; CheckpointHeader::SIZE];
+        reader.read_exact(&mut header_bytes)?;
+        let header = CheckpointHeader::from_bytes(&header_bytes)?;
+
+        // Read data
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+
+        // Verify checksum
+        let mut hasher = Crc32Hasher::new();
+        hasher.update(&data);
+        let computed_checksum = hasher.finalize();
+
+        Ok(computed_checksum == header.checksum)
+    }
+
+    /// List all checkpoints with metadata.
+    ///
+    /// # Returns
+    ///
+    /// Vector of (path, games_completed, timestamp_str, size_bytes).
+    pub fn list_checkpoints(&self) -> Result<Vec<(String, u64, String, u64)>, LearningError> {
+        let mut checkpoints = Vec::new();
+
+        for entry in fs::read_dir(&self.checkpoint_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if let Some(filename) = path.file_name().and_then(|n| n.to_str())
+                && filename.starts_with("checkpoint_")
+                && filename.ends_with(".bin")
+                && let Ok(file) = File::open(&path)
+            {
+                // Try to read header for metadata
+                let mut reader = BufReader::new(file);
+                let mut header_bytes = [0u8; CheckpointHeader::SIZE];
+                if reader.read_exact(&mut header_bytes).is_ok()
+                    && let Ok(header) = CheckpointHeader::from_bytes(&header_bytes)
+                {
+                    let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    let timestamp = chrono::DateTime::from_timestamp(header.timestamp, 0)
+                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+
+                    checkpoints.push((
+                        path.to_string_lossy().to_string(),
+                        header.games_completed,
+                        timestamp,
+                        size,
+                    ));
+                }
+            }
+        }
+
+        // Sort by game count descending
+        checkpoints.sort_by(|a, b| b.1.cmp(&a.1));
+
+        Ok(checkpoints)
+    }
+
+    /// Find the latest checkpoint in the directory.
+    pub fn find_latest(&self) -> Result<Option<PathBuf>, LearningError> {
+        let mut latest: Option<(u64, PathBuf)> = None;
+
+        for entry in fs::read_dir(&self.checkpoint_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if let Some(filename) = path.file_name().and_then(|n| n.to_str())
+                && let Some(game_count) = Self::parse_checkpoint_filename(filename)
+            {
+                match &latest {
+                    None => latest = Some((game_count, path)),
+                    Some((current_max, _)) if game_count > *current_max => {
+                        latest = Some((game_count, path))
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(latest.map(|(_, path)| path))
+    }
+
+    /// Apply retention policy, deleting old checkpoints.
+    fn apply_retention(&self) -> Result<Vec<PathBuf>, LearningError> {
+        let mut checkpoints: Vec<(u64, PathBuf)> = Vec::new();
+
+        for entry in fs::read_dir(&self.checkpoint_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if let Some(filename) = path.file_name().and_then(|n| n.to_str())
+                && let Some(game_count) = Self::parse_checkpoint_filename(filename)
+            {
+                checkpoints.push((game_count, path));
+            }
+        }
+
+        // Sort by game count descending
+        checkpoints.sort_by(|a, b| b.0.cmp(&a.0));
+
+        // Delete checkpoints beyond retention count
+        let mut deleted = Vec::new();
+        if checkpoints.len() > self.retention_count {
+            for (_, path) in checkpoints.into_iter().skip(self.retention_count) {
+                if fs::remove_file(&path).is_ok() {
+                    log::info!("Deleted old checkpoint: {}", path.display());
+                    deleted.push(path);
+                }
+            }
+        }
+
+        Ok(deleted)
+    }
+
+    /// Parse game count from checkpoint filename.
+    fn parse_checkpoint_filename(filename: &str) -> Option<u64> {
+        if filename.starts_with("checkpoint_") && filename.ends_with(".bin") {
+            let num_str = &filename[11..filename.len() - 4];
+            num_str.parse().ok()
+        } else {
+            None
+        }
+    }
+
+    /// Write evaluation table to buffer.
+    fn write_eval_table_to_buffer(
+        &self,
+        buffer: &mut Vec<u8>,
+        table: &EvaluationTable,
+        patterns: &[Pattern],
+    ) -> Result<(), LearningError> {
+        for stage in 0..NUM_STAGES {
+            for pattern_id in 0..NUM_PATTERNS {
+                let num_entries = Self::get_pattern_entries(patterns, pattern_id);
+                for index in 0..num_entries {
+                    let value = table.get(pattern_id, stage, index);
+                    buffer.extend_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Read evaluation table from reader.
+    fn read_eval_table_from_reader<R: Read>(
+        &self,
+        reader: &mut R,
+        patterns: &[Pattern],
+    ) -> Result<EvaluationTable, LearningError> {
+        let mut table = EvaluationTable::from_patterns(patterns);
+
+        for stage in 0..NUM_STAGES {
+            for pattern_id in 0..NUM_PATTERNS {
+                let num_entries = Self::get_pattern_entries(patterns, pattern_id);
+                for index in 0..num_entries {
+                    let mut buf = [0u8; 2];
+                    reader.read_exact(&mut buf)?;
+                    let value = u16::from_le_bytes(buf);
+                    table.set(pattern_id, stage, index, value);
+                }
+            }
+        }
+
+        Ok(table)
+    }
+
+    /// Write Adam moments to buffer.
+    fn write_adam_moments_to_buffer(
+        &self,
+        buffer: &mut Vec<u8>,
+        moments: &crate::learning::adam::AdamMoments,
+        patterns: &[Pattern],
+    ) -> Result<(), LearningError> {
+        for stage in 0..NUM_STAGES {
+            for pattern_id in 0..NUM_PATTERNS {
+                let num_entries = Self::get_pattern_entries(patterns, pattern_id);
+                for index in 0..num_entries {
+                    let value = moments.get(pattern_id, stage, index);
+                    buffer.extend_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Read Adam moments from reader.
+    fn read_adam_moments_from_reader<R: Read>(
+        &self,
+        reader: &mut R,
+        moments: &mut crate::learning::adam::AdamMoments,
+        patterns: &[Pattern],
+    ) -> Result<(), LearningError> {
+        for stage in 0..NUM_STAGES {
+            for pattern_id in 0..NUM_PATTERNS {
+                let num_entries = Self::get_pattern_entries(patterns, pattern_id);
+                for index in 0..num_entries {
+                    let mut buf = [0u8; 4];
+                    reader.read_exact(&mut buf)?;
+                    let value = f32::from_le_bytes(buf);
+                    moments.set(pattern_id, stage, index, value);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Get number of entries for a pattern.
     fn get_pattern_entries(patterns: &[Pattern], pattern_id: usize) -> usize {
         assert!(
             pattern_id < patterns.len(),
