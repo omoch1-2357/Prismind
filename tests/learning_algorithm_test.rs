@@ -61,11 +61,12 @@ fn test_td_error_computation_positive_outcome() {
     let final_score = 10.0;
     let stats = learner.update(&history, final_score, &mut eval_table, &mut adam);
 
-    // TD error should be positive (target > evaluation for winning position)
-    assert!(
-        stats.avg_td_error > 0.0 || stats.moves_processed == 3,
-        "Should process moves"
-    );
+    // Verify moves were processed
+    assert_eq!(stats.moves_processed, 3, "Should process all 3 moves");
+
+    // Note: TD error direction depends on initial evaluation values
+    // With neutral initial values (32768), positive final score should produce positive TD error
+    println!("Avg TD error: {}", stats.avg_td_error);
 }
 
 #[test]
@@ -498,7 +499,6 @@ fn test_epsilon_schedule_monotonic_decrease() {
 }
 
 // ========== Task 11.3.6: Convergence Monitor Tests ==========
-
 #[test]
 fn test_convergence_monitor_detects_stagnation() {
     // Req 10.6: Test stagnation detection
@@ -512,7 +512,12 @@ fn test_convergence_monitor_detects_stagnation() {
 
     // Should detect stagnation after window is full with same value
     let is_stagnating = monitor.is_stagnating();
-    println!("Is stagnating after constant values: {}", is_stagnating);
+    // With STAGNATION_WINDOW games of no improvement, should detect stagnation
+    assert!(
+        is_stagnating,
+        "Should detect stagnation after {} games with constant values",
+        200
+    );
 }
 
 #[test]

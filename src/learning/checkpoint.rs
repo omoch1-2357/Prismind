@@ -211,7 +211,8 @@ impl CheckpointManager {
         elapsed_time_secs: u64,
     ) -> Result<PathBuf, LearningError> {
         let checkpoint_path = self.checkpoint_path(game_count);
-        let file = File::create(&checkpoint_path)?;
+        let temp_path = checkpoint_path.with_extension("tmp");
+        let file = File::create(&temp_path)?;
         let mut writer = BufWriter::new(file);
 
         // Write magic header
@@ -236,6 +237,10 @@ impl CheckpointManager {
         self.write_adam_moments(&mut writer, adam.second_moment(), patterns)?;
 
         writer.flush()?;
+        drop(writer); // Ensure file is closed before rename
+
+        // Atomic rename
+        std::fs::rename(&temp_path, &checkpoint_path)?;
 
         Ok(checkpoint_path)
     }

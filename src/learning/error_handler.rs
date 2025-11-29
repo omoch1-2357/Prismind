@@ -472,14 +472,19 @@ where
 {
     // 最初の試行
     match save_fn() {
-        Ok(()) => return Ok(()),
-        Err(_e) => {
-            // Log is handled by caller since we don't have log crate dependency here
+        Ok(()) => Ok(()),
+        Err(_first_error) => {
+            // リトライ
+            match save_fn() {
+                Ok(()) => Ok(()),
+                Err(second_error) => {
+                    // 両方のエラーを報告することも検討
+                    // 現在は最後のエラーのみを返す
+                    Err(second_error)
+                }
+            }
         }
     }
-
-    // リトライ
-    save_fn()
 }
 
 #[cfg(test)]

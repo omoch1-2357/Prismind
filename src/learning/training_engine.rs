@@ -675,12 +675,6 @@ impl TrainingEngine {
                 // Sanitize leaf value - convert NaN/Inf to 0.0
                 let sanitized_leaf = EvalRecovery::sanitize_f32(h.leaf_value);
 
-                // Log if we had to sanitize
-                if EvalRecovery::is_invalid(h.leaf_value) {
-                    // Track divergence but don't stop the update
-                    // The sanitize call has already fixed the value
-                }
-
                 MoveRecord::new(
                     sanitized_leaf,
                     h.pattern_indices,
