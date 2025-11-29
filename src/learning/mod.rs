@@ -53,6 +53,7 @@ use thiserror::Error;
 
 // Submodules
 pub mod adam;
+pub mod benchmark;
 pub mod checkpoint;
 pub mod convergence;
 pub mod eligibility_trace;
@@ -68,6 +69,12 @@ pub mod training_engine;
 
 // Re-export public types
 pub use adam::{AdamMoments, AdamOptimizer};
+pub use benchmark::{
+    BenchmarkResult, BenchmarkRunner, CPUUtilizationBenchmark, CheckpointBenchmark,
+    GameThroughputBenchmark, MAX_CHECKPOINT_SAVE_SECS, MAX_TD_UPDATE_MS, MIN_CPU_UTILIZATION_PCT,
+    NUM_THREADS, SearchBenchmark, TARGET_GAMES_PER_SEC, TARGET_SEARCH_TIME_MS, TARGET_TOTAL_GAMES,
+    TARGET_TRAINING_HOURS, TDUpdateBenchmark, TrainingTimeEstimator,
+};
 pub use checkpoint::{CHECKPOINT_MAGIC, CheckpointManager, CheckpointMeta};
 pub use convergence::{
     CONVERGENCE_REPORT_INTERVAL, ConvergenceMetrics, ConvergenceMonitor, IMPROVEMENT_THRESHOLD,

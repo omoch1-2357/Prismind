@@ -182,7 +182,7 @@
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
 
 ## Task 11. Performance Optimization and Testing
-- [ ] 11.1 Implement performance benchmarks
+- [x] 11.1 Implement performance benchmarks
   - Measure game throughput targeting 4.6 games/second minimum
   - Measure TD update latency targeting under 10ms per game
   - Measure checkpoint save time targeting under 30 seconds
@@ -191,7 +191,7 @@
   - Track total training time progress toward 50-60 hour target
   - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.7_
 
-- [ ] 11.2 Integration tests for complete training flow
+- [x] 11.2 Integration tests for complete training flow
   - Test single self-play game completion with valid history
   - Test TD update produces expected weight changes
   - Test checkpoint save/load round-trip preserves state exactly
@@ -200,7 +200,7 @@
   - Test epsilon schedule transitions at boundary game numbers
   - _Requirements: 1.1, 4.1, 6.7, 9.1, 13.8_
 
-- [ ]* 11.3 Unit tests for algorithm correctness
+- [x] 11.3 Unit tests for algorithm correctness
   - Test TD error computation for known game positions
   - Test eligibility trace increment, decay, and reset operations
   - Test Adam optimizer bias correction computation
