@@ -25,7 +25,7 @@
 
 ## Task 2. PyEvaluator Implementation
 
-- [ ] 2.1 Implement PyEvaluator class with board evaluation
+- [x] 2.1 Implement PyEvaluator class with board evaluation
   - Create PyEvaluator class wrapping the Rust Evaluator with thread-safe access via Arc
   - Implement constructor accepting optional checkpoint path for loading pre-trained weights
   - Implement evaluate method accepting 64-element board array (Python list) with player indicator
@@ -35,13 +35,13 @@
   - Note: GIL release pattern for evaluate() - release GIL during Rust computation to avoid blocking Python
   - _Requirements: 1.1, 1.2, 1.8_
 
-- [ ] 2.2 (P) Add NumPy array support to PyEvaluator
+- [x] 2.2 (P) Add NumPy array support to PyEvaluator
   - Implement evaluate_numpy method accepting NumPy array for efficient data interchange
   - Handle NumPy array conversion to internal board representation
   - Ensure thread-safety for concurrent evaluation calls from Python
   - _Requirements: 1.9_
 
-- [ ] 2.3 (P) Implement pattern weight access for external analysis
+- [x] 2.3 (P) Implement pattern weight access for external analysis
   - Implement get_weights method returning dictionary mapping (pattern_id, stage, index) to weight value
   - Implement get_weight method for accessing specific pattern entry weights
   - Expose pattern table through RwLock for thread-safe read access
