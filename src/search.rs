@@ -1530,6 +1530,47 @@ impl Search {
             Ok(result)
         }
     }
+
+    /// 評価関数への参照を取得
+    ///
+    /// Phase 3学習システムで静的評価に使用する。
+    ///
+    /// # Returns
+    ///
+    /// 評価関数への参照
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use prismind::board::BitBoard;
+    /// use prismind::evaluator::Evaluator;
+    /// use prismind::search::Search;
+    ///
+    /// let evaluator = Evaluator::new("data/patterns.csv").unwrap();
+    /// let search = Search::new(evaluator, 128).unwrap();
+    /// let board = BitBoard::new();
+    /// let static_eval = search.evaluator().evaluate(&board);
+    /// ```
+    #[inline]
+    pub fn evaluator(&self) -> &Evaluator {
+        &self.evaluator
+    }
+
+    /// 盤面の静的評価を取得（探索なし）
+    ///
+    /// Phase 3学習システムでランダム手選択時のリーフ値として使用する。
+    ///
+    /// # Arguments
+    ///
+    /// * `board` - 評価する盤面
+    ///
+    /// # Returns
+    ///
+    /// f32型の評価値（石差）
+    #[inline]
+    pub fn evaluate_static(&self, board: &BitBoard) -> f32 {
+        self.evaluator.evaluate(board)
+    }
 }
 
 #[cfg(test)]

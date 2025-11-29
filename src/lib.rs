@@ -84,6 +84,7 @@
 // 公開モジュール
 pub mod board;
 pub mod evaluator;
+pub mod learning;
 pub mod pattern;
 pub mod search;
 

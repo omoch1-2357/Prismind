@@ -179,13 +179,15 @@ pub fn u16_to_score_simd(values: &[u16; 8]) -> [f32; 8] {
 /// # メモリ使用量
 ///
 /// 総使用量: 約70-80MB（30ステージ × 約2.3MB/ステージ）
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EvaluationTable {
     /// \[ステージ\]\[平坦化配列\]の2次元データ
     /// 各ステージは全14パターンのエントリを連続配置
     data: Vec<Box<[u16]>>,
     /// 各パターンの開始オフセット位置
     pattern_offsets: [usize; 14],
+    /// 各パターンのサイズ（3^k）
+    pattern_sizes: [usize; 14],
 }
 
 /// 評価関数（Evaluator）
@@ -209,7 +211,7 @@ pub struct EvaluationTable {
 /// let eval = evaluator.evaluate(&board);
 /// println!("評価値: {}", eval);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Evaluator {
     /// パターン定義配列（14個）
     patterns: [Pattern; 14],
@@ -254,12 +256,15 @@ impl EvaluationTable {
     pub fn new(patterns: &[Pattern]) -> Self {
         assert_eq!(patterns.len(), 14, "Expected exactly 14 patterns");
 
-        // 各パターンの開始オフセットを計算
+        // 各パターンの開始オフセットとサイズを計算
         let mut pattern_offsets = [0; 14];
+        let mut pattern_sizes = [0; 14];
         let mut offset = 0;
         for (i, pattern) in patterns.iter().enumerate() {
             pattern_offsets[i] = offset;
-            offset += 3_usize.pow(pattern.k as u32);
+            let size = 3_usize.pow(pattern.k as u32);
+            pattern_sizes[i] = size;
+            offset += size;
         }
 
         let total_entries_per_stage = offset;
@@ -275,6 +280,7 @@ impl EvaluationTable {
         Self {
             data,
             pattern_offsets,
+            pattern_sizes,
         }
     }
 
@@ -294,8 +300,19 @@ impl EvaluationTable {
     ///
     /// pattern_id、stage、indexが範囲外の場合
     pub fn get(&self, pattern_id: usize, stage: usize, index: usize) -> u16 {
-        assert!(pattern_id < 14, "pattern_id must be 0-13");
-        assert!(stage < 30, "stage must be 0-29");
+        debug_assert!(
+            pattern_id < 14,
+            "pattern_id must be 0-13, got {}",
+            pattern_id
+        );
+        debug_assert!(stage < 30, "stage must be 0-29, got {}", stage);
+        debug_assert!(
+            index < self.pattern_sizes[pattern_id],
+            "index {} out of bounds for pattern {} (max {})",
+            index,
+            pattern_id,
+            self.pattern_sizes[pattern_id] - 1
+        );
 
         let offset = self.pattern_offsets[pattern_id] + index;
         self.data[stage][offset]
@@ -316,8 +333,19 @@ impl EvaluationTable {
     ///
     /// pattern_id、stage、indexが範囲外の場合
     pub fn set(&mut self, pattern_id: usize, stage: usize, index: usize, value: u16) {
-        assert!(pattern_id < 14, "pattern_id must be 0-13");
-        assert!(stage < 30, "stage must be 0-29");
+        debug_assert!(
+            pattern_id < 14,
+            "pattern_id must be 0-13, got {}",
+            pattern_id
+        );
+        debug_assert!(stage < 30, "stage must be 0-29, got {}", stage);
+        debug_assert!(
+            index < self.pattern_sizes[pattern_id],
+            "index {} out of bounds for pattern {} (max {})",
+            index,
+            pattern_id,
+            self.pattern_sizes[pattern_id] - 1
+        );
 
         let offset = self.pattern_offsets[pattern_id] + index;
         self.data[stage][offset] = value;
@@ -379,6 +407,39 @@ impl Evaluator {
         let table = EvaluationTable::new(&patterns);
 
         Ok(Self { patterns, table })
+    }
+
+    /// Create an Evaluator from an existing EvaluationTable.
+    ///
+    /// This constructor is used for Phase 3 learning where the evaluation
+    /// table is shared and updated during training. A copy of the table
+    /// data is made for thread-safe parallel evaluation.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - Reference to an existing EvaluationTable
+    /// * `patterns` - Pattern definitions array
+    ///
+    /// # Returns
+    ///
+    /// A new Evaluator that uses a copy of the provided table.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use prismind::evaluator::{Evaluator, EvaluationTable};
+    /// use prismind::pattern::load_patterns;
+    ///
+    /// let patterns = load_patterns("patterns.csv").unwrap();
+    /// let table = EvaluationTable::new(&patterns);
+    /// let evaluator = Evaluator::from_table(&table, &patterns);
+    /// ```
+    pub fn from_table(table: &EvaluationTable, patterns: &[Pattern; 14]) -> Self {
+        // Clone the table data for thread-safe usage
+        Self {
+            patterns: *patterns,
+            table: table.clone(),
+        }
     }
 
     /// 盤面の評価値を計算
