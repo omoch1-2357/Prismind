@@ -1,0 +1,52 @@
+[build-system]
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "prismind"
+version = "0.1.0"
+description = "High-performance Othello AI engine with pattern-based evaluation and reinforcement learning"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: Games/Entertainment :: Board Games",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = ["othello", "reversi", "ai", "game", "reinforcement-learning"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "numpy>=1.21",
+]
+
+[tool.maturin]
+# Build with PyO3 extension-module feature
+features = ["pyo3"]
+# Python source directory for pure Python modules (if any)
+python-source = "python"
+# Module name matches the Rust library name
+module-name = "prismind._prismind"
+# Enable stable ABI for better cross-version compatibility
+python-packages = []
+# Strip symbols in release builds for smaller size
+strip = true
+
+# ARM64 cross-compilation notes:
+# Build for ARM64 Linux: maturin build --release --target aarch64-unknown-linux-gnu
+# Build with zig for cross-compilation: maturin build --release --target aarch64-unknown-linux-gnu --zig
+# NEON SIMD optimizations are enabled automatically via target-cpu=native on ARM64

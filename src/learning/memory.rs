@@ -563,7 +563,7 @@ mod tests {
     #[test]
     fn test_eval_table_memory_validation() {
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         let actual_mb = table.memory_usage() as f64 / (1024.0 * 1024.0);
 
@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn test_adam_memory_is_double_eval_table() {
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
         let adam = AdamOptimizer::new(&patterns);
 
         // Adam uses f32 (4 bytes) x 2 arrays (m, v) = 8 bytes per entry
@@ -799,7 +799,7 @@ mod tests {
     #[test]
     fn test_validate_total_memory_within_budget() {
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
         let adam = AdamOptimizer::new(&patterns);
 
         // With test patterns (smaller than real), should be well within budget

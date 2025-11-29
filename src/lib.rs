@@ -92,6 +92,10 @@ pub mod search;
 #[cfg(target_arch = "aarch64")]
 pub mod arm64;
 
+// PyO3 Python bindings module (feature-gated)
+#[cfg(feature = "pyo3")]
+pub mod python;
+
 // 再エクスポート: よく使用される型と関数をクレートルートから直接アクセス可能にする
 pub use board::{
     BitBoard, Color, DIRECTIONS, GameError, GameState, UndoInfo, check_game_state, display,

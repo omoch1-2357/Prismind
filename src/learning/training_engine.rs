@@ -248,7 +248,7 @@ impl TrainingEngine {
         })?;
 
         // Initialize evaluation table
-        let eval_table = EvaluationTable::new(&patterns);
+        let eval_table = EvaluationTable::from_patterns(&patterns);
         let eval_table = Arc::new(std::sync::RwLock::new(eval_table));
 
         // Initialize Adam optimizer
@@ -1025,7 +1025,7 @@ mod tests {
 
         let patterns_vec = crate::pattern::load_patterns("patterns.csv").unwrap();
         let patterns: [Pattern; 14] = patterns_vec.try_into().unwrap();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
 
         // Set timestep

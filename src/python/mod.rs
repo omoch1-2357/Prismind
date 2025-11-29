@@ -1,0 +1,210 @@
+//! PyO3 Python bindings for Prismind Othello AI
+//!
+//! This module provides Python bindings for the Prismind Othello AI engine,
+//! exposing pattern-based evaluation, training management, and debugging utilities.
+//!
+//! # Module Structure
+//!
+//! The Python module `prismind._prismind` exposes the following classes:
+//!
+//! - [`PyEvaluator`] - Board evaluation using pattern tables
+//! - [`PyTrainingManager`] - Training session control with pause/resume
+//! - [`PyCheckpointManager`] - Checkpoint save/load with integrity verification
+//! - [`PyStatisticsManager`] - Statistics and monitoring aggregation
+//! - [`PyDebugModule`] - Debugging and diagnostic utilities
+//!
+//! # Example
+//!
+//! ```python
+//! from prismind import PyEvaluator
+//!
+//! evaluator = PyEvaluator()
+//! board = [0] * 64  # Empty board
+//! board[27] = 2  # White at D4
+//! board[28] = 1  # Black at E4
+//! score = evaluator.evaluate(board, 1)
+//! print(f"Evaluation: {score}")
+//! ```
+
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
+#[cfg(feature = "pyo3")]
+mod evaluator;
+
+#[cfg(feature = "pyo3")]
+pub use evaluator::PyEvaluator;
+
+// Placeholder types for future implementation (Tasks 3, 6, 8, 10)
+// These will be implemented in subsequent tasks
+
+/// PyO3 module entry point for the Prismind Python extension.
+///
+/// This function is called by Python when importing `prismind._prismind`.
+/// It registers all PyO3 classes and module metadata.
+#[cfg(feature = "pyo3")]
+#[pymodule]
+fn _prismind(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Register PyEvaluator class
+    m.add_class::<PyEvaluator>()?;
+
+    // Register placeholder classes (implemented as simple PyO3 classes)
+    // These will be fully implemented in subsequent tasks
+    m.add_class::<PyTrainingManager>()?;
+    m.add_class::<PyCheckpointManager>()?;
+    m.add_class::<PyStatisticsManager>()?;
+    m.add_class::<PyDebugModule>()?;
+
+    // Add module version from Cargo package
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+
+    Ok(())
+}
+
+// Placeholder PyO3 classes - will be fully implemented in subsequent tasks
+
+/// Training session manager for controlling training lifecycle.
+///
+/// Provides start, pause, resume functionality for long-running training sessions.
+#[cfg(feature = "pyo3")]
+#[pyclass]
+pub struct PyTrainingManager {
+    // Will be implemented in Task 6
+}
+
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl PyTrainingManager {
+    /// Create a new training manager.
+    #[new]
+    pub fn new() -> PyResult<Self> {
+        Ok(Self {})
+    }
+
+    /// Check if training is currently active.
+    pub fn is_training_active(&self) -> bool {
+        false
+    }
+
+    /// Get current training state.
+    pub fn get_state(&self) -> String {
+        "idle".to_string()
+    }
+}
+
+/// Checkpoint manager for saving and loading training state.
+///
+/// Supports atomic saves, CRC32 verification, and configurable retention.
+#[cfg(feature = "pyo3")]
+#[pyclass]
+pub struct PyCheckpointManager {
+    // Will be implemented in Task 3.6
+}
+
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl PyCheckpointManager {
+    /// Create a new checkpoint manager.
+    #[new]
+    #[pyo3(signature = (_checkpoint_dir="checkpoints", _retention_count=5, _compression_enabled=false))]
+    pub fn new(
+        _checkpoint_dir: &str,
+        _retention_count: usize,
+        _compression_enabled: bool,
+    ) -> PyResult<Self> {
+        Ok(Self {})
+    }
+
+    /// List available checkpoints.
+    pub fn list_checkpoints(&self) -> PyResult<Vec<(String, u64, String, u64)>> {
+        Ok(vec![])
+    }
+}
+
+/// Statistics and monitoring aggregator.
+///
+/// Provides unified access to convergence metrics, benchmarks, and memory usage.
+#[cfg(feature = "pyo3")]
+#[pyclass]
+pub struct PyStatisticsManager {
+    // Will be implemented in Task 8
+}
+
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl PyStatisticsManager {
+    /// Create a new statistics manager.
+    #[new]
+    pub fn new() -> PyResult<Self> {
+        Ok(Self {})
+    }
+}
+
+/// Debug utilities for training diagnostics.
+///
+/// Provides board visualization, weight inspection, and anomaly detection.
+#[cfg(feature = "pyo3")]
+#[pyclass]
+pub struct PyDebugModule {
+    // Will be implemented in Task 10
+}
+
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl PyDebugModule {
+    /// Create a new debug module.
+    #[new]
+    pub fn new() -> PyResult<Self> {
+        Ok(Self {})
+    }
+
+    /// Visualize board as ASCII string.
+    pub fn visualize_board(&self, board: Vec<i8>) -> String {
+        if board.len() != 64 {
+            return "Invalid board: must have 64 elements".to_string();
+        }
+
+        let mut result = String::new();
+        result.push_str("  A B C D E F G H\n");
+
+        for row in 0..8 {
+            result.push_str(&format!("{} ", row + 1));
+            for col in 0..8 {
+                let idx = row * 8 + col;
+                let cell = match board[idx] {
+                    0 => '.',
+                    1 => 'X', // Black
+                    2 => 'O', // White
+                    _ => '?',
+                };
+                result.push(cell);
+                result.push(' ');
+            }
+            result.push('\n');
+        }
+
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_module_compiles() {
+        // This test verifies the module structure compiles correctly
+        // Actual functionality is tested in integration tests
+        // If this test runs, the module compiled successfully
+    }
+
+    #[cfg(feature = "pyo3")]
+    #[test]
+    fn test_pyo3_classes_exist() {
+        // Verify all PyO3 classes are defined
+        use super::*;
+        let _ = std::any::type_name::<PyEvaluator>();
+        let _ = std::any::type_name::<PyTrainingManager>();
+        let _ = std::any::type_name::<PyCheckpointManager>();
+        let _ = std::any::type_name::<PyStatisticsManager>();
+        let _ = std::any::type_name::<PyDebugModule>();
+    }
+}

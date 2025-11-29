@@ -112,7 +112,7 @@ impl SharedEvaluator {
         })?;
 
         // Initialize evaluation table
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         Ok(Self {
             table: Arc::new(RwLock::new(table)),
@@ -314,7 +314,7 @@ mod tests {
     /// Create a SharedEvaluator for testing
     fn create_test_evaluator() -> SharedEvaluator {
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
         SharedEvaluator::from_parts(patterns, table)
     }
 

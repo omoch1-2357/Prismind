@@ -465,7 +465,7 @@ impl CheckpointManager {
         reader: &mut R,
         patterns: &[Pattern],
     ) -> Result<EvaluationTable, LearningError> {
-        let mut table = EvaluationTable::new(patterns);
+        let mut table = EvaluationTable::from_patterns(patterns);
 
         for stage in 0..NUM_STAGES {
             for pattern_id in 0..NUM_PATTERNS {
@@ -658,7 +658,7 @@ mod tests {
         let manager = CheckpointManager::new(temp_dir.path()).unwrap();
 
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
         let adam = AdamOptimizer::new(&patterns);
 
         // Save initial checkpoint (game_count = 0)
@@ -679,7 +679,7 @@ mod tests {
         let manager = CheckpointManager::new(temp_dir.path()).unwrap();
 
         let patterns = create_test_patterns();
-        let mut table = EvaluationTable::new(&patterns);
+        let mut table = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
 
         // Modify table and adam to have non-default values
@@ -721,7 +721,7 @@ mod tests {
         let manager = CheckpointManager::new(temp_dir.path()).unwrap();
 
         let patterns = create_test_patterns();
-        let mut table = EvaluationTable::new(&patterns);
+        let mut table = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
 
         // Set specific values across different patterns and stages
@@ -773,7 +773,7 @@ mod tests {
         let manager = CheckpointManager::new(temp_dir.path()).unwrap();
 
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
         let adam = AdamOptimizer::new(&patterns);
 
         let path = manager
@@ -843,7 +843,7 @@ mod tests {
         let manager = CheckpointManager::new(temp_dir.path()).unwrap();
 
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
         let adam = AdamOptimizer::new(&patterns);
 
         manager.save(100000, &table, &adam, &patterns, 0).unwrap();
@@ -865,7 +865,7 @@ mod tests {
         let manager = CheckpointManager::new(temp_dir.path()).unwrap();
 
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
         let adam = AdamOptimizer::new(&patterns);
 
         // Save multiple checkpoints
@@ -906,7 +906,7 @@ mod tests {
         let manager = CheckpointManager::new(temp_dir.path()).unwrap();
 
         let patterns = create_test_patterns();
-        let mut table = EvaluationTable::new(&patterns);
+        let mut table = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
 
         // Req 6.1: 24-byte magic header
