@@ -337,19 +337,19 @@
 
 ## Task 12. Build Scripts and Deployment Configuration
 
-- [ ] 12.1 (P) Create build scripts with common targets
+- [x] 12.1 (P) Create build scripts with common targets
   - Create Makefile or build script providing targets: build, test, bench, release, install
   - Add development mode build for rapid iteration
   - Add release mode build with all optimizations enabled
   - _Requirements: 11.6_
 
-- [ ] 12.2 (P) Create systemd service file for background training
+- [x] 12.2 (P) Create systemd service file for background training
   - Define systemd service unit for running training as background service
   - Configure automatic restart on failure
   - Set appropriate resource limits and working directory
   - _Requirements: 11.7_
 
-- [ ] 12.3 (P) Document OCI Ampere A1 deployment setup
+- [x] 12.3 (P) Document OCI Ampere A1 deployment setup
   - Create deployment instructions for OCI Ampere A1 environment
   - Include Python environment setup and dependency installation
   - Document ARM64-specific build steps and optimizations

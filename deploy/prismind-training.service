@@ -1,0 +1,119 @@
+# Systemd service file for Prismind Othello AI Training
+#
+# This service runs the Prismind training process as a background daemon.
+# Requirements Coverage: 11.7 (systemd service file for background training)
+#
+# Installation:
+#   1. Copy to systemd directory:
+#      sudo cp prismind-training.service /etc/systemd/system/
+#
+#   2. Edit the service file to set correct paths and user:
+#      sudo nano /etc/systemd/system/prismind-training.service
+#
+#   3. Reload systemd and enable the service:
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable prismind-training
+#
+#   4. Start the service:
+#      sudo systemctl start prismind-training
+#
+# Management commands:
+#   sudo systemctl status prismind-training   # Check status
+#   sudo systemctl stop prismind-training     # Stop training
+#   sudo systemctl restart prismind-training  # Restart training
+#   journalctl -u prismind-training -f        # View logs
+#
+# Note: The service is configured to automatically resume training from
+# the latest checkpoint when restarted.
+
+[Unit]
+Description=Prismind Othello AI Training Service
+Documentation=https://github.com/your-repo/prismind
+After=network.target
+Wants=network-online.target
+
+[Service]
+# Service type - simple for long-running process
+Type=simple
+
+# User and group to run as (change to your deployment user)
+# Using a dedicated user is recommended for security
+User=prismind
+Group=prismind
+
+# Working directory - set to your Prismind installation
+WorkingDirectory=/opt/prismind
+
+# Environment variables
+Environment="PYTHONUNBUFFERED=1"
+Environment="RUST_BACKTRACE=1"
+Environment="RUST_LOG=info"
+
+# Python virtual environment (uncomment and adjust if using venv)
+# Environment="PATH=/opt/prismind/venv/bin:/usr/local/bin:/usr/bin:/bin"
+# Environment="VIRTUAL_ENV=/opt/prismind/venv"
+
+# Main command to run
+# Training 1 million games with auto-resume and checkpoint every 10k games
+ExecStart=/usr/bin/python3 /opt/prismind/python/train.py \
+    --target-games 1000000 \
+    --checkpoint-interval 10000 \
+    --callback-interval 1000 \
+    --search-time 15 \
+    --epsilon 0.1 \
+    --resume \
+    --checkpoint-dir /opt/prismind/checkpoints \
+    --log-dir /opt/prismind/logs
+
+# Graceful stop - send SIGTERM, wait, then SIGKILL
+# The training script handles SIGTERM gracefully with checkpoint save
+ExecStop=/bin/kill -SIGTERM $MAINPID
+TimeoutStopSec=60
+
+# Restart configuration
+# Restart on failure, but not on clean exit (training complete)
+Restart=on-failure
+RestartSec=30
+# Maximum restart attempts (5 times in 5 minutes)
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Resource limits
+# Memory limit - adjust based on your instance (600MB is minimum for training)
+MemoryMax=2G
+MemoryHigh=1G
+
+# CPU quota (optional) - limit to 80% to leave headroom for system
+# CPUQuota=80%
+
+# Process limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Writable directories (adjust paths as needed)
+ReadWritePaths=/opt/prismind/checkpoints
+ReadWritePaths=/opt/prismind/logs
+
+# Standard output and error go to journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=prismind-training
+
+# Nice value - lower priority than interactive processes
+Nice=10
+
+# I/O scheduling - best effort, slightly lower priority
+IOSchedulingClass=best-effort
+IOSchedulingPriority=4
+
+[Install]
+WantedBy=multi-user.target
