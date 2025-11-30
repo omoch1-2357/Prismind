@@ -290,24 +290,24 @@
 
 ## Task 10. PyDebugModule Implementation
 
-- [ ] 10.1 (P) Implement board and pattern visualization
+- [x] 10.1 (P) Implement board and pattern visualization
   - Create PyDebugModule class wrapping EvaluationTable and ErrorTracker
   - Implement visualize_board method outputting ASCII representation of board state
   - Implement visualize_pattern method showing pattern indices and current weights
   - _Requirements: 8.1, 8.2_
 
-- [ ] 10.2 (P) Implement trace and weight inspection
+- [x] 10.2 (P) Implement trace and weight inspection
   - Implement inspect_trace method showing eligibility trace values for a position
   - Implement compare_checkpoints method diffing two checkpoints and reporting changed entries
   - Implement get_weight method for specific pattern entry access
   - _Requirements: 8.3, 8.6_
 
-- [ ] 10.3 (P) Implement game replay with detailed logging
+- [x] 10.3 (P) Implement game replay with detailed logging
   - Implement replay_game method re-executing game from history with verbose logging
   - Log all TD updates with before/after weight values when debug mode enabled
   - _Requirements: 8.4, 8.5_
 
-- [ ] 10.4 (P) Implement data export and anomaly detection
+- [x] 10.4 (P) Implement data export and anomaly detection
   - Implement export_csv method supporting training data export for external analysis
   - Implement detect_anomalies method identifying sudden large weight changes
   - Log position and pattern details for anomalous values

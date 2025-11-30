@@ -43,6 +43,9 @@ mod training_manager;
 mod statistics_manager;
 
 #[cfg(feature = "pyo3")]
+mod debug_module;
+
+#[cfg(feature = "pyo3")]
 pub use evaluator::PyEvaluator;
 
 #[cfg(feature = "pyo3")]
@@ -54,10 +57,8 @@ pub use training_manager::{PyTrainingManager, PyTrainingResult};
 #[cfg(feature = "pyo3")]
 pub use statistics_manager::PyStatisticsManager;
 
-// Placeholder types for future implementation (Task 10)
-// PyCheckpointManager is now fully implemented in checkpoint_manager.rs
-// PyTrainingManager and PyTrainingResult are implemented in training_manager.rs (Task 6)
-// PyStatisticsManager is now fully implemented in statistics_manager.rs (Task 8)
+#[cfg(feature = "pyo3")]
+pub use debug_module::PyDebugModule;
 
 /// PyO3 module entry point for the Prismind Python extension.
 ///
@@ -90,52 +91,7 @@ fn _prismind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-/// Debug utilities for training diagnostics.
-///
-/// Provides board visualization, weight inspection, and anomaly detection.
-#[cfg(feature = "pyo3")]
-#[pyclass]
-pub struct PyDebugModule {
-    // Will be implemented in Task 10
-}
-
-#[cfg(feature = "pyo3")]
-#[pymethods]
-impl PyDebugModule {
-    /// Create a new debug module.
-    #[new]
-    pub fn new() -> PyResult<Self> {
-        Ok(Self {})
-    }
-
-    /// Visualize board as ASCII string.
-    pub fn visualize_board(&self, board: Vec<i8>) -> String {
-        if board.len() != 64 {
-            return "Invalid board: must have 64 elements".to_string();
-        }
-
-        let mut result = String::new();
-        result.push_str("  A B C D E F G H\n");
-
-        for row in 0..8 {
-            result.push_str(&format!("{} ", row + 1));
-            for col in 0..8 {
-                let idx = row * 8 + col;
-                let cell = match board[idx] {
-                    0 => '.',
-                    1 => 'X', // Black
-                    2 => 'O', // White
-                    _ => '?',
-                };
-                result.push(cell);
-                result.push(' ');
-            }
-            result.push('\n');
-        }
-
-        result
-    }
-}
+// PyDebugModule is now fully implemented in debug_module.rs (Task 10)
 
 #[cfg(test)]
 mod tests {
