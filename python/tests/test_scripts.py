@@ -17,16 +17,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import script modules
 try:
-    import train
-    import monitor
     import evaluate
+    import monitor
+    import train
 except ImportError:
     # Create mock modules if prismind is not available
     pass
@@ -381,10 +380,7 @@ class TestEvaluateScript(unittest.TestCase):
         self.assertGreater(result.black_score + result.white_score, 0)
         self.assertGreater(result.move_count, 0)
         # Exactly one of these should be true
-        self.assertEqual(
-            result.black_won + result.white_won + result.draw,
-            1
-        )
+        self.assertEqual(result.black_won + result.white_won + result.draw, 1)
 
     def test_evaluation_result_dataclass(self):
         """Test EvaluationResult dataclass."""
@@ -396,7 +392,7 @@ class TestEvaluateScript(unittest.TestCase):
             draws=5,
             model_win_rate=0.6,
             avg_stone_diff=5.2,
-            avg_move_count=50.0
+            avg_move_count=50.0,
         )
         self.assertEqual(result.opponent_name, "Test")
         self.assertEqual(result.games_played, 100)

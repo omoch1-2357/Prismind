@@ -30,7 +30,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 # Try to import prismind module
 # This is done conditionally to allow testing of script utilities without the full library
@@ -39,7 +39,8 @@ PyEvaluator = None
 PyCheckpointManager = None
 
 try:
-    from prismind import PyEvaluator, PyCheckpointManager
+    from prismind import PyCheckpointManager, PyEvaluator
+
     _PRISMIND_AVAILABLE = True
 except ImportError:
     # Module not available - utilities can still be tested
@@ -52,35 +53,60 @@ BLACK = 1
 WHITE = 2
 
 # Direction offsets for move calculation
-DIRECTIONS = [
-    (-1, -1), (-1, 0), (-1, 1),
-    (0, -1),          (0, 1),
-    (1, -1),  (1, 0), (1, 1)
-]
+DIRECTIONS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
 # Corner positions (highly strategic)
 CORNERS = {0, 7, 56, 63}
 
 # Edge positions (excluding corners)
 EDGES = {
-    1, 2, 3, 4, 5, 6,           # Top edge
-    8, 16, 24, 32, 40, 48,      # Left edge
-    15, 23, 31, 39, 47, 55,     # Right edge
-    57, 58, 59, 60, 61, 62      # Bottom edge
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,  # Top edge
+    8,
+    16,
+    24,
+    32,
+    40,
+    48,  # Left edge
+    15,
+    23,
+    31,
+    39,
+    47,
+    55,  # Right edge
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,  # Bottom edge
 }
 
 # Positions adjacent to corners (dangerous X-squares and C-squares)
 DANGER_SQUARES = {
-    1, 8, 9,                    # Near corner 0
-    6, 14, 15,                  # Near corner 7
-    48, 49, 57,                 # Near corner 56
-    54, 55, 62                  # Near corner 63
+    1,
+    8,
+    9,  # Near corner 0
+    6,
+    14,
+    15,  # Near corner 7
+    48,
+    49,
+    57,  # Near corner 56
+    54,
+    55,
+    62,  # Near corner 63
 }
 
 
 @dataclass
 class GameResult:
     """Result of a single game."""
+
     black_score: int
     white_score: int
     black_won: bool
@@ -92,6 +118,7 @@ class GameResult:
 @dataclass
 class EvaluationResult:
     """Result of evaluation against an opponent."""
+
     opponent_name: str
     games_played: int
     model_wins: int
@@ -299,10 +326,7 @@ class HeuristicPlayer:
             return None
 
         # Sort moves by priority
-        moves_with_priority = [
-            (pos, self._get_move_priority(board, pos))
-            for pos in legal_moves
-        ]
+        moves_with_priority = [(pos, self._get_move_priority(board, pos)) for pos in legal_moves]
         moves_with_priority.sort(key=lambda x: x[1], reverse=True)
 
         # Get all moves with the highest priority
@@ -321,7 +345,7 @@ class ModelPlayer:
     with the highest evaluation.
     """
 
-    def __init__(self, evaluator: PyEvaluator):
+    def __init__(self, evaluator: Any):
         """Initialize with a PyEvaluator instance."""
         self.evaluator = evaluator
 
@@ -332,7 +356,7 @@ class ModelPlayer:
             return None
 
         best_move = None
-        best_score = float('-inf')
+        best_score = float("-inf")
 
         for move in legal_moves:
             # Make the move and evaluate the resulting position
@@ -353,11 +377,7 @@ class ModelPlayer:
         return best_move
 
 
-def play_game(
-    black_player,
-    white_player,
-    max_moves: int = 100
-) -> GameResult:
+def play_game(black_player: Any, white_player: Any, max_moves: int = 100) -> GameResult:
     """
     Play a single game between two players.
 
@@ -399,17 +419,16 @@ def play_game(
         black_won=black_score > white_score,
         white_won=white_score > black_score,
         draw=black_score == white_score,
-        move_count=move_count
+        move_count=move_count,
     )
 
 
 def evaluate_against_opponent(
     model_player: ModelPlayer,
-    opponent,
+    opponent: Any,
     opponent_name: str,
     num_games: int,
-    model_plays_black_first: bool = True,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> EvaluationResult:
     """
     Evaluate the model against an opponent.
@@ -447,10 +466,10 @@ def evaluate_against_opponent(
 
         if result.black_won:
             model_wins += 1
-            total_stone_diff += (result.black_score - result.white_score)
+            total_stone_diff += result.black_score - result.white_score
         elif result.white_won:
             opponent_wins += 1
-            total_stone_diff += (result.black_score - result.white_score)
+            total_stone_diff += result.black_score - result.white_score
         else:
             draws += 1
 
@@ -464,10 +483,10 @@ def evaluate_against_opponent(
 
         if result.white_won:
             model_wins += 1
-            total_stone_diff += (result.white_score - result.black_score)
+            total_stone_diff += result.white_score - result.black_score
         elif result.black_won:
             opponent_wins += 1
-            total_stone_diff += (result.white_score - result.black_score)
+            total_stone_diff += result.white_score - result.black_score
         else:
             draws += 1
 
@@ -482,7 +501,7 @@ def evaluate_against_opponent(
         draws=draws,
         model_win_rate=model_wins / num_games if num_games > 0 else 0,
         avg_stone_diff=total_stone_diff / num_games if num_games > 0 else 0,
-        avg_move_count=total_moves / num_games if num_games > 0 else 0
+        avg_move_count=total_moves / num_games if num_games > 0 else 0,
     )
 
 
@@ -493,8 +512,10 @@ def print_evaluation_result(result: EvaluationResult) -> None:
     print(f"{'=' * 50}")
     print(f"  Games Played:     {result.games_played:,}")
     print(f"  Model Wins:       {result.model_wins:,} ({result.model_win_rate:.1%})")
-    print(f"  Opponent Wins:    {result.opponent_wins:,} ({result.opponent_wins/result.games_played:.1%})")
-    print(f"  Draws:            {result.draws:,} ({result.draws/result.games_played:.1%})")
+    print(
+        f"  Opponent Wins:    {result.opponent_wins:,} ({result.opponent_wins / result.games_played:.1%})"
+    )
+    print(f"  Draws:            {result.draws:,} ({result.draws / result.games_played:.1%})")
     print(f"  Avg Stone Diff:   {result.avg_stone_diff:+.1f}")
     print(f"  Avg Move Count:   {result.avg_move_count:.1f}")
 
@@ -525,60 +546,49 @@ Examples:
 
     # Only test against heuristic player
     python evaluate.py --checkpoint latest --heuristic-only
-        """
+        """,
     )
 
     parser.add_argument(
-        "--checkpoint", "-c",
+        "--checkpoint",
+        "-c",
         type=str,
         required=True,
-        help="Path to checkpoint file, or 'latest' for most recent checkpoint"
+        help="Path to checkpoint file, or 'latest' for most recent checkpoint",
     )
 
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
         default="checkpoints",
-        help="Directory for checkpoint files when using 'latest' (default: checkpoints)"
+        help="Directory for checkpoint files when using 'latest' (default: checkpoints)",
     )
 
     parser.add_argument(
-        "--games", "-g",
+        "--games",
+        "-g",
         type=int,
         default=500,
-        help="Number of games to play against each opponent (default: 500)"
+        help="Number of games to play against each opponent (default: 500)",
     )
 
     parser.add_argument(
-        "--random-only",
-        action="store_true",
-        help="Only test against random player"
+        "--random-only", action="store_true", help="Only test against random player"
     )
 
     parser.add_argument(
-        "--heuristic-only",
-        action="store_true",
-        help="Only test against heuristic player"
+        "--heuristic-only", action="store_true", help="Only test against heuristic player"
     )
 
     parser.add_argument(
-        "--seed", "-s",
-        type=int,
-        default=None,
-        help="Random seed for reproducibility"
+        "--seed", "-s", type=int, default=None, help="Random seed for reproducibility"
     )
 
     parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Show detailed progress during evaluation"
+        "--verbose", "-v", action="store_true", help="Show detailed progress during evaluation"
     )
 
-    parser.add_argument(
-        "--quiet", "-q",
-        action="store_true",
-        help="Only show final summary"
-    )
+    parser.add_argument("--quiet", "-q", action="store_true", help="Only show final summary")
 
     return parser
 
@@ -604,7 +614,8 @@ def main() -> int:
     checkpoint_path = args.checkpoint
     if checkpoint_path.lower() == "latest":
         try:
-            checkpoint_manager = PyCheckpointManager(
+            assert PyCheckpointManager is not None, "prismind module not available"
+            checkpoint_manager = PyCheckpointManager(  # type: ignore[unreachable]
                 checkpoint_dir=args.checkpoint_dir
             )
             checkpoints = checkpoint_manager.list_checkpoints()
@@ -625,13 +636,14 @@ def main() -> int:
         print(f"\nLoading model from: {checkpoint_path}")
 
     try:
-        evaluator = PyEvaluator(checkpoint_path=checkpoint_path)
+        assert PyEvaluator is not None, "prismind module not available"
+        evaluator = PyEvaluator(checkpoint_path=checkpoint_path)  # type: ignore[unreachable]
     except Exception as e:
         print(f"Error loading checkpoint: {e}")
         return 1
 
     # Create model player
-    model_player = ModelPlayer(evaluator)
+    model_player = ModelPlayer(evaluator)  # type: ignore[unreachable]
 
     # Set random seed
     seed = args.seed
@@ -658,7 +670,7 @@ def main() -> int:
             random_player,
             "Random Player",
             args.games,
-            verbose=args.verbose and not args.quiet
+            verbose=args.verbose and not args.quiet,
         )
         results.append(result)
         if not args.quiet:
@@ -672,7 +684,7 @@ def main() -> int:
             heuristic_player,
             "Heuristic Player (Corner/Edge Priority)",
             args.games,
-            verbose=args.verbose and not args.quiet
+            verbose=args.verbose and not args.quiet,
         )
         results.append(result)
         if not args.quiet:

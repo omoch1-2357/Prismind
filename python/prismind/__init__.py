@@ -16,11 +16,11 @@ Example usage:
 """
 
 from prismind._prismind import (
-    PyEvaluator,
-    PyTrainingManager,
     PyCheckpointManager,
-    PyStatisticsManager,
     PyDebugModule,
+    PyEvaluator,
+    PyStatisticsManager,
+    PyTrainingManager,
     __version__,
 )
 

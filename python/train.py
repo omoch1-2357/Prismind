@@ -28,13 +28,12 @@ License: MIT
 
 import argparse
 import logging
-import os
 import signal
 import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, List, Optional, Tuple, Union
 
 # Try to import prismind module
 # This is done conditionally to allow testing of script utilities without the full library
@@ -44,7 +43,8 @@ PyCheckpointManager = None
 PyStatisticsManager = None
 
 try:
-    from prismind import PyTrainingManager, PyCheckpointManager, PyStatisticsManager
+    from prismind import PyTrainingManager
+
     _PRISMIND_AVAILABLE = True
 except ImportError:
     # Module not available - utilities can still be tested
@@ -54,7 +54,7 @@ except ImportError:
 
 # Global flag for graceful shutdown
 _shutdown_requested = False
-_training_manager: Optional[PyTrainingManager] = None
+_training_manager: Optional[Any] = None
 
 
 def setup_logging(log_dir: str, log_level: str = "info") -> logging.Logger:
@@ -90,12 +90,10 @@ def setup_logging(log_dir: str, log_level: str = "info") -> logging.Logger:
 
     # Create formatters
     console_formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)-8s | %(message)s",
-        datefmt="%H:%M:%S"
+        "%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%H:%M:%S"
     )
     file_formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
 
     # Console handler
@@ -115,7 +113,7 @@ def setup_logging(log_dir: str, log_level: str = "info") -> logging.Logger:
     return logger
 
 
-def signal_handler(signum: int, frame) -> None:
+def signal_handler(signum: int, _frame: Any) -> None:
     """
     Handle interrupt signals (Ctrl+C) for graceful shutdown.
 
@@ -128,7 +126,7 @@ def signal_handler(signum: int, frame) -> None:
     """
     global _shutdown_requested, _training_manager
 
-    signal_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
+    signal_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
 
     if _shutdown_requested:
         # Second interrupt - force exit
@@ -156,17 +154,16 @@ def format_duration(seconds: float) -> str:
 
     if days > 0:
         return f"{days}d {hours}h {minutes}m"
-    elif hours > 0:
+    if hours > 0:
         return f"{hours}h {minutes}m {secs}s"
-    elif minutes > 0:
+    if minutes > 0:
         return f"{minutes}m {secs}s"
-    else:
-        return f"{secs}s"
+    return f"{secs}s"
 
 
 def format_eta(seconds: float) -> str:
     """Format ETA in human-readable format."""
-    if seconds == float('inf') or seconds < 0:
+    if seconds == float("inf") or seconds < 0:
         return "N/A"
     return format_duration(seconds)
 
@@ -202,7 +199,9 @@ def progress_callback(games: int, stone_diff: float, win_rate: float, elapsed_se
     logger.info(msg)
 
 
-def parse_epsilon_schedule(schedule_str: str) -> list:
+def parse_epsilon_schedule(
+    schedule_str: str,
+) -> List[Union[Tuple[int, float], Tuple[int, float, float]]]:
     """
     Parse epsilon schedule string into list of (games, epsilon) tuples.
 
@@ -220,7 +219,7 @@ def parse_epsilon_schedule(schedule_str: str) -> list:
     Returns:
         List of (games_threshold, epsilon_value) tuples
     """
-    schedule = []
+    schedule: List[Union[Tuple[int, float], Tuple[int, float, float]]] = []
 
     for phase in schedule_str.split(","):
         parts = phase.strip().split(":")
@@ -264,50 +263,52 @@ Examples:
 
     # Quick test run
     python train.py --target-games 1000 --checkpoint-interval 500
-        """
+        """,
     )
 
     # Training parameters
     parser.add_argument(
-        "--target-games", "-t",
+        "--target-games",
+        "-t",
         type=int,
         default=1_000_000,
-        help="Target number of games to train (default: 1,000,000)"
+        help="Target number of games to train (default: 1,000,000)",
     )
 
     parser.add_argument(
-        "--checkpoint-interval", "-c",
+        "--checkpoint-interval",
+        "-c",
         type=int,
         default=10_000,
-        help="Games between checkpoint saves (default: 10,000)"
+        help="Games between checkpoint saves (default: 10,000)",
     )
 
     parser.add_argument(
         "--callback-interval",
         type=int,
         default=100,
-        help="Games between progress callbacks (default: 100)"
+        help="Games between progress callbacks (default: 100)",
     )
 
     parser.add_argument(
-        "--search-time", "-s",
+        "--search-time",
+        "-s",
         type=int,
         default=15,
-        help="Search time per move in milliseconds (default: 15)"
+        help="Search time per move in milliseconds (default: 15)",
     )
 
     parser.add_argument(
-        "--epsilon", "-e",
+        "--epsilon",
+        "-e",
         type=str,
         default="0.1",
-        help="Epsilon for exploration. Format: constant value, or 'start:end:games' for decay (default: 0.1)"
+        help="Epsilon for exploration. Format: constant value, or 'start:end:games' for decay (default: 0.1)",
     )
 
     # Resume options
     parser.add_argument(
-        "--resume", "-r",
-        action="store_true",
-        help="Resume training from latest checkpoint"
+        "--resume", "-r", action="store_true", help="Resume training from latest checkpoint"
     )
 
     # Directory paths
@@ -315,21 +316,18 @@ Examples:
         "--checkpoint-dir",
         type=str,
         default="checkpoints",
-        help="Directory for checkpoint files (default: checkpoints)"
+        help="Directory for checkpoint files (default: checkpoints)",
     )
 
     parser.add_argument(
-        "--log-dir",
-        type=str,
-        default="logs",
-        help="Directory for log files (default: logs)"
+        "--log-dir", type=str, default="logs", help="Directory for log files (default: logs)"
     )
 
     parser.add_argument(
         "--pattern-file",
         type=str,
         default="patterns.csv",
-        help="Path to pattern definitions file (default: patterns.csv)"
+        help="Path to pattern definitions file (default: patterns.csv)",
     )
 
     # Logging options
@@ -338,13 +336,11 @@ Examples:
         type=str,
         choices=["debug", "info", "warning", "error"],
         default="info",
-        help="Logging level (default: info)"
+        help="Logging level (default: info)",
     )
 
     parser.add_argument(
-        "--quiet", "-q",
-        action="store_true",
-        help="Suppress progress output (only show errors)"
+        "--quiet", "-q", action="store_true", help="Suppress progress output (only show errors)"
     )
 
     return parser
@@ -397,10 +393,9 @@ def main() -> int:
 
         # Create training manager
         logger.info("Initializing training manager...")
-        _training_manager = PyTrainingManager(
-            checkpoint_dir=args.checkpoint_dir,
-            log_dir=args.log_dir,
-            pattern_file=args.pattern_file
+        assert PyTrainingManager is not None, "prismind module not available"
+        _training_manager = PyTrainingManager(  # type: ignore[unreachable]
+            checkpoint_dir=args.checkpoint_dir, log_dir=args.log_dir, pattern_file=args.pattern_file
         )
 
         # Set progress callback
@@ -422,7 +417,11 @@ def main() -> int:
             epsilon_schedule = parse_epsilon_schedule(args.epsilon)
             # For now, use the first (or constant) epsilon value
             if len(epsilon_schedule) == 1:
-                epsilon = epsilon_schedule[0][1] if len(epsilon_schedule[0]) == 2 else epsilon_schedule[0][0]
+                epsilon = (
+                    epsilon_schedule[0][1]
+                    if len(epsilon_schedule[0]) == 2
+                    else epsilon_schedule[0][0]
+                )
             else:
                 epsilon = epsilon_schedule[0][1] if len(epsilon_schedule[0]) > 1 else 0.1
         except ValueError as e:
@@ -438,7 +437,7 @@ def main() -> int:
             checkpoint_interval=args.checkpoint_interval,
             callback_interval=args.callback_interval,
             search_time_ms=args.search_time,
-            epsilon=epsilon
+            epsilon=epsilon,
         )
 
         # Log completion

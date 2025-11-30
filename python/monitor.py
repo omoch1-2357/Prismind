@@ -25,12 +25,13 @@ License: MIT
 """
 
 import argparse
+import contextlib
 import os
 import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 # Try to import prismind module
 # This is done conditionally to allow testing of script utilities without the full library
@@ -39,7 +40,8 @@ PyStatisticsManager = None
 PyCheckpointManager = None
 
 try:
-    from prismind import PyStatisticsManager, PyCheckpointManager
+    from prismind import PyCheckpointManager, PyStatisticsManager
+
     _PRISMIND_AVAILABLE = True
 except ImportError:
     # Module not available - utilities can still be tested
@@ -49,6 +51,7 @@ except ImportError:
 # ANSI color codes for terminal formatting
 class Colors:
     """ANSI color codes for terminal output."""
+
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
@@ -83,13 +86,13 @@ def supports_color() -> bool:
         # Enable ANSI colors on Windows 10+
         try:
             import ctypes
+
             kernel32 = ctypes.windll.kernel32
             kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
             return True
         except Exception:
-            return False
-
-    return True
+            pass
+    return False
 
 
 # Disable colors if not supported
@@ -126,12 +129,11 @@ def format_duration(seconds: float) -> str:
 
     if days > 0:
         return f"{days}d {hours}h {minutes}m"
-    elif hours > 0:
+    if hours > 0:
         return f"{hours}h {minutes}m {secs}s"
-    elif minutes > 0:
+    if minutes > 0:
         return f"{minutes}m {secs}s"
-    else:
-        return f"{secs}s"
+    return f"{secs}s"
 
 
 def format_percentage(value: float) -> str:
@@ -172,7 +174,6 @@ def ascii_chart(
     width: int = 60,
     height: int = 15,
     title: str = "",
-    y_label: str = ""
 ) -> str:
     """
     Create a simple ASCII line chart.
@@ -244,7 +245,7 @@ def ascii_chart(
 
     # X-axis
     lines.append(f"       +{'-' * chart_width}")
-    x_labels = f"        {x_min:<{chart_width//2}}{x_max:>{chart_width//2}}"
+    x_labels = f"        {x_min:<{chart_width // 2}}{x_max:>{chart_width // 2}}"
     lines.append(f"{Colors.DIM}{x_labels}{Colors.RESET}")
 
     return "\n".join(lines)
@@ -279,10 +280,10 @@ def print_status(status: str, ok: bool = True) -> None:
 
 
 def display_dashboard(
-    stats_manager: PyStatisticsManager,
-    checkpoint_manager: Optional[PyCheckpointManager] = None,
+    stats_manager: Any,
+    checkpoint_manager: Optional[Any] = None,
     show_charts: bool = False,
-    history: Optional[List[Tuple[int, float, float]]] = None
+    history: Optional[List[Tuple[int, float, float]]] = None,
 ) -> None:
     """
     Display the training dashboard.
@@ -312,14 +313,20 @@ def display_dashboard(
         convergence = stats_manager.get_convergence_metrics()
         print_kv("Stone Diff (Avg)", f"{convergence.get('stone_diff_avg', 0):+.2f}")
         print_kv("Eval Variance", f"{convergence.get('eval_variance', 0):.4f}")
-        print_kv("Pattern Coverage", format_percentage(convergence.get('pattern_coverage', 0) / 100))
+        print_kv(
+            "Pattern Coverage", format_percentage(convergence.get("pattern_coverage", 0) / 100)
+        )
 
-        stagnating = convergence.get('stagnation_detected', False)
+        stagnating = convergence.get("stagnation_detected", False)
         stag_color = Colors.RED if stagnating else Colors.GREEN
         stag_text = "DETECTED" if stagnating else "None"
-        print(f"  {Colors.DIM}{'Stagnation':<25}{Colors.RESET}{stag_color}{stag_text}{Colors.RESET}")
+        print(
+            f"  {Colors.DIM}{'Stagnation':<25}{Colors.RESET}{stag_color}{stag_text}{Colors.RESET}"
+        )
 
-        print_kv("Games Since Improvement", format_number(convergence.get('games_since_improvement', 0)))
+        print_kv(
+            "Games Since Improvement", format_number(convergence.get("games_since_improvement", 0))
+        )
     except Exception as e:
         print(f"  {Colors.RED}Error getting convergence metrics: {e}{Colors.RESET}")
 
@@ -327,12 +334,12 @@ def display_dashboard(
     print_section("Pattern Update Coverage")
     try:
         coverage = stats_manager.get_pattern_coverage()
-        print_kv("Unique Entries Updated", format_number(coverage.get('unique_entries_updated', 0)))
-        print_kv("Total Updates", format_number(coverage.get('total_updates', 0)))
-        print_kv("Coverage %", format_percentage(coverage.get('entry_coverage_pct', 0) / 100))
+        print_kv("Unique Entries Updated", format_number(coverage.get("unique_entries_updated", 0)))
+        print_kv("Total Updates", format_number(coverage.get("total_updates", 0)))
+        print_kv("Coverage %", format_percentage(coverage.get("entry_coverage_pct", 0) / 100))
         print_kv("Avg Updates/Entry", f"{coverage.get('avg_updates_per_entry', 0):.2f}")
 
-        warnings = coverage.get('warnings', [])
+        warnings = coverage.get("warnings", [])
         if warnings:
             print(f"\n  {Colors.YELLOW}Warnings:{Colors.RESET}")
             for warning in warnings:
@@ -344,15 +351,15 @@ def display_dashboard(
     print_section("Memory Usage")
     try:
         memory = stats_manager.get_memory_report()
-        total_mb = memory.get('total_mb', 0)
-        budget_mb = memory.get('budget_mb', 600)
-        within_budget = memory.get('within_budget', True)
+        total_mb = memory.get("total_mb", 0)
+        budget_mb = memory.get("budget_mb", 600)
+        within_budget = memory.get("within_budget", True)
 
-        print_kv("Pattern Tables", format_mb(memory.get('pattern_tables_mb', 0)))
-        print_kv("Adam Optimizer", format_mb(memory.get('adam_state_mb', 0)))
-        print_kv("Transposition Table", format_mb(memory.get('tt_mb', 0)))
-        print_kv("Game History", format_mb(memory.get('game_history_mb', 0)))
-        print_kv("Misc Overhead", format_mb(memory.get('misc_mb', 0)))
+        print_kv("Pattern Tables", format_mb(memory.get("pattern_tables_mb", 0)))
+        print_kv("Adam Optimizer", format_mb(memory.get("adam_state_mb", 0)))
+        print_kv("Transposition Table", format_mb(memory.get("tt_mb", 0)))
+        print_kv("Game History", format_mb(memory.get("game_history_mb", 0)))
+        print_kv("Misc Overhead", format_mb(memory.get("misc_mb", 0)))
         print()
         print_kv("Total", format_mb(total_mb))
         print_kv("Budget", format_mb(budget_mb))
@@ -376,7 +383,7 @@ def display_dashboard(
             if checkpoints:
                 latest = checkpoints[-1]
                 print_kv("Latest Checkpoint", f"{latest[1]:,} games")
-                print_kv("Checkpoint Size", f"{latest[3] / (1024*1024):.1f} MB")
+                print_kv("Checkpoint Size", f"{latest[3] / (1024 * 1024):.1f} MB")
         except Exception as e:
             print(f"  {Colors.RED}Error getting checkpoint info: {e}{Colors.RESET}")
 
@@ -386,22 +393,14 @@ def display_dashboard(
 
         # Stone difference chart
         stone_diff_data = [(h[0], h[1]) for h in history]
-        print(ascii_chart(
-            stone_diff_data,
-            width=60,
-            height=10,
-            title="Stone Difference Over Games"
-        ))
+        print(
+            ascii_chart(stone_diff_data, width=60, height=10, title="Stone Difference Over Games")
+        )
         print()
 
         # Win rate chart
         win_rate_data = [(h[0], h[2] * 100) for h in history]
-        print(ascii_chart(
-            win_rate_data,
-            width=60,
-            height=10,
-            title="Win Rate % Over Games"
-        ))
+        print(ascii_chart(win_rate_data, width=60, height=10, title="Win Rate % Over Games"))
 
     # Footer
     print(f"\n{Colors.DIM}Press Ctrl+C to exit | Refresh rate: 5 seconds{Colors.RESET}")
@@ -430,40 +429,27 @@ Examples:
 
     # One-shot display (no refresh)
     python monitor.py --once
-        """
+        """,
     )
 
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
         default="checkpoints",
-        help="Directory for checkpoint files (default: checkpoints)"
+        help="Directory for checkpoint files (default: checkpoints)",
     )
 
     parser.add_argument(
-        "--refresh", "-r",
-        type=int,
-        default=5,
-        help="Refresh interval in seconds (default: 5)"
+        "--refresh", "-r", type=int, default=5, help="Refresh interval in seconds (default: 5)"
     )
 
-    parser.add_argument(
-        "--plot", "-p",
-        action="store_true",
-        help="Show training progress charts"
-    )
+    parser.add_argument("--plot", "-p", action="store_true", help="Show training progress charts")
 
     parser.add_argument(
-        "--once", "-o",
-        action="store_true",
-        help="Display once and exit (no continuous refresh)"
+        "--once", "-o", action="store_true", help="Display once and exit (no continuous refresh)"
     )
 
-    parser.add_argument(
-        "--no-color",
-        action="store_true",
-        help="Disable colored output"
-    )
+    parser.add_argument("--no-color", action="store_true", help="Disable colored output")
 
     return parser
 
@@ -494,17 +480,14 @@ def main() -> int:
             return 1
 
         # Create statistics manager
-        stats_manager = PyStatisticsManager()
+        assert PyStatisticsManager is not None, "prismind module not available"
+        stats_manager = PyStatisticsManager()  # type: ignore[unreachable]
 
         # Create checkpoint manager if directory exists
         checkpoint_manager = None
-        if Path(args.checkpoint_dir).exists():
-            try:
-                checkpoint_manager = PyCheckpointManager(
-                    checkpoint_dir=args.checkpoint_dir
-                )
-            except Exception:
-                pass  # Optional, continue without checkpoint info
+        if PyCheckpointManager is not None and Path(args.checkpoint_dir).exists():
+            with contextlib.suppress(Exception):
+                checkpoint_manager = PyCheckpointManager(checkpoint_dir=args.checkpoint_dir)
 
         # Training history for charts
         history: List[Tuple[int, float, float]] = []
@@ -512,10 +495,7 @@ def main() -> int:
         if args.once:
             # One-shot display
             display_dashboard(
-                stats_manager,
-                checkpoint_manager,
-                show_charts=args.plot,
-                history=history
+                stats_manager, checkpoint_manager, show_charts=args.plot, history=history
             )
             return 0
 
@@ -549,7 +529,7 @@ def main() -> int:
                     stats_manager,
                     checkpoint_manager,
                     show_charts=args.plot,
-                    history=history if len(history) > 1 else None
+                    history=history if len(history) > 1 else None,
                 )
 
                 # Wait for refresh interval
