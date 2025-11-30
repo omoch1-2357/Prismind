@@ -390,28 +390,45 @@ impl PyTrainingManager {
 
     /// Resume training from latest checkpoint.
     ///
-    /// Prepares the training engine to continue from where it was paused.
+    /// Loads the latest checkpoint and prepares the training engine to continue.
     /// Call start_training() after this to continue training.
     ///
     /// # Raises
     ///
-    /// * `RuntimeError` - If resume fails
+    /// * `RuntimeError` - If no checkpoint exists or resume fails
     ///
     /// # Requirements
     ///
     /// - Req 2.3: resume_training loads latest checkpoint and continues
     pub fn resume_training(&mut self, py: Python<'_>) -> PyResult<()> {
+        // Get config
+        let config = self
+            .config
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {}", e)))?
+            .clone();
+
+        // Find latest checkpoint
+        let checkpoint_mgr =
+            crate::learning::checkpoint::CheckpointManager::new(&config.checkpoint_dir)
+                .map_err(|e| PyRuntimeError::new_err(format!("Checkpoint manager error: {}", e)))?;
+
+        let latest_path = py
+            .allow_threads(|| checkpoint_mgr.find_latest())
+            .map_err(|e| PyRuntimeError::new_err(format!("Find latest error: {}", e)))?
+            .ok_or_else(|| PyRuntimeError::new_err("No checkpoint found to resume from"))?;
+
+        // Create engine from checkpoint using TrainingEngine::resume()
+        let engine = py
+            .allow_threads(|| TrainingEngine::resume(&latest_path, config))
+            .map_err(|e| PyRuntimeError::new_err(format!("Resume failed: {}", e)))?;
+
+        // Store the new engine
         let mut engine_guard = self
             .engine
             .lock()
             .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {}", e)))?;
-
-        let engine = engine_guard
-            .as_mut()
-            .ok_or_else(|| PyRuntimeError::new_err("No training session to resume"))?;
-
-        py.allow_threads(|| engine.resume_training())
-            .map_err(|e| PyRuntimeError::new_err(format!("Resume failed: {}", e)))?;
+        *engine_guard = Some(engine);
 
         Ok(())
     }
