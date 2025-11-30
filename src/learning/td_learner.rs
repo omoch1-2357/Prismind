@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn test_update_empty_history() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn test_update_single_move() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -428,7 +428,7 @@ mod tests {
     #[test]
     fn test_update_multiple_moves() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn test_td_error_tracked() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -477,7 +477,7 @@ mod tests {
         // is used for non-terminal positions
 
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn test_final_position_uses_game_result() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn test_side_to_move_black() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -554,7 +554,7 @@ mod tests {
     #[test]
     fn test_side_to_move_white() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn test_weights_change_after_update() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -627,7 +627,7 @@ mod tests {
     #[test]
     fn test_traces_reset_after_update() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -643,7 +643,7 @@ mod tests {
     #[test]
     fn test_stats_moves_processed() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -659,7 +659,7 @@ mod tests {
     #[test]
     fn test_complete_game_simulation() {
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
         let mut learner = TDLearner::new(0.3);
 
@@ -684,7 +684,7 @@ mod tests {
         println!("=== TD-Leaf Learner Requirements Verification ===");
 
         let patterns = create_test_patterns();
-        let mut evaluator = EvaluationTable::new(&patterns);
+        let mut evaluator = EvaluationTable::from_patterns(&patterns);
         let mut adam = AdamOptimizer::new(&patterns);
 
         // Req 1.1: lambda=0.3

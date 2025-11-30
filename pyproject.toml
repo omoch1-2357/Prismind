@@ -1,0 +1,126 @@
+[build-system]
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "prismind"
+version = "0.1.0"
+description = "High-performance Othello AI engine with pattern-based evaluation and reinforcement learning"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: Games/Entertainment :: Board Games",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = ["othello", "reversi", "ai", "game", "reinforcement-learning"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "numpy>=1.21",
+]
+
+[tool.maturin]
+# Build with PyO3 extension-module feature
+features = ["pyo3"]
+# Python source directory for pure Python modules (if any)
+python-source = "python"
+# Module name matches the Rust library name
+module-name = "prismind._prismind"
+# Enable stable ABI for better cross-version compatibility
+python-packages = []
+# Strip symbols in release builds for smaller size
+strip = true
+
+# ARM64 cross-compilation notes:
+# Build for ARM64 Linux: maturin build --release --target aarch64-unknown-linux-gnu
+# Build with zig for cross-compilation: maturin build --release --target aarch64-unknown-linux-gnu --zig
+# NEON SIMD optimizations are enabled automatically via target-cpu=native on ARM64
+
+[tool.ruff]
+# Target Python 3.8+ compatibility
+target-version = "py38"
+# Include only Python source files
+include = ["python/**/*.py"]
+# Exclude generated files and caches
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+    "*.egg-info",
+]
+# Line length limit
+line-length = 100
+
+[tool.ruff.lint]
+# Enable recommended rules plus additional checks
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "RET", # flake8-return
+    "ARG", # flake8-unused-arguments
+]
+# Disable specific rules that may conflict with project style
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "B008",   # Function call in argument defaults
+    "RET504", # Unnecessary variable assignment before return
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files can have unused arguments and assertions
+"python/tests/**/*.py" = ["ARG001", "ARG002"]
+
+[tool.mypy]
+# Target Python 3.9+ (mypy requires 3.9 minimum)
+python_version = "3.9"
+# Only check Python source files
+files = ["python/**/*.py"]
+# Exclude test and cache directories
+exclude = [
+    "^build/",
+    "^dist/",
+    "^__pycache__/",
+    "^\\.venv/",
+    "^python/tests/",
+]
+# Strict type checking
+strict = true
+# Allow missing imports for compiled extensions
+ignore_missing_imports = true
+# Show error codes
+show_error_codes = true
+# Warn about unused ignores
+warn_unused_ignores = true
+# Disallow untyped definitions
+disallow_untyped_defs = true
+# Disallow incomplete definitions
+disallow_incomplete_defs = true
+# Warn about unreachable code
+warn_unreachable = true
+# Warn about redundant casts
+warn_redundant_casts = true

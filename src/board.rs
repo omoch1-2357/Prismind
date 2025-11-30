@@ -185,6 +185,39 @@ impl BitBoard {
         }
     }
 
+    /// Create a BitBoard from raw masks and turn.
+    ///
+    /// This constructor is used for creating boards from external representations
+    /// (e.g., Python arrays in PyO3 bindings).
+    ///
+    /// # Arguments
+    ///
+    /// * `black` - Bit mask for black stones (A1=bit 0, H8=bit 63)
+    /// * `white` - Bit mask for white stones
+    /// * `turn` - Current player's turn
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use prismind::board::{BitBoard, Color};
+    ///
+    /// let board = BitBoard::from_masks(
+    ///     (1u64 << 28) | (1u64 << 35),  // Black at E4, D5
+    ///     (1u64 << 27) | (1u64 << 36),  // White at D4, E5
+    ///     Color::Black,
+    /// );
+    /// assert_eq!(board.black.count_ones(), 2);
+    /// assert_eq!(board.white_mask().count_ones(), 2);
+    /// ```
+    pub fn from_masks(black: u64, white: u64, turn: Color) -> Self {
+        let meta = match turn {
+            Color::Black => 0,
+            Color::White => TURN_BIT,
+        };
+
+        Self { black, white, meta }
+    }
+
     /// 盤面を白黒反転
     ///
     /// 黒石と白石を入れ替え、手番も反転する。

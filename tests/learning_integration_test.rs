@@ -150,7 +150,7 @@ fn test_td_update_produces_weight_changes() {
     // Req 1.1: Test TD update produces expected weight changes
 
     let patterns = load_patterns_array();
-    let mut eval_table = EvaluationTable::new(&patterns);
+    let mut eval_table = EvaluationTable::from_patterns(&patterns);
 
     // Create a simple evaluator and search for game play
     let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
@@ -193,7 +193,7 @@ fn test_td_update_direction_matches_outcome() {
     // Req 1.3: Test TD error has correct sign based on outcome
 
     let patterns = load_patterns_array();
-    let mut eval_table = EvaluationTable::new(&patterns);
+    let mut eval_table = EvaluationTable::from_patterns(&patterns);
 
     let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
     let mut search = Search::new(evaluator, 128).expect("Failed to create search");
@@ -239,7 +239,7 @@ fn test_checkpoint_save_load_preserves_state() {
 
     // Create and modify evaluation table
     let patterns = load_patterns_array();
-    let mut eval_table = EvaluationTable::new(&patterns);
+    let mut eval_table = EvaluationTable::from_patterns(&patterns);
 
     // Make some modifications (using safe indices within pattern bounds)
     eval_table.set(0, 0, 100, 40000);
@@ -305,7 +305,7 @@ fn test_checkpoint_round_trip_all_patterns() {
 
     let temp_dir = tempdir().unwrap();
     let patterns = load_patterns_array();
-    let mut eval_table = EvaluationTable::new(&patterns);
+    let mut eval_table = EvaluationTable::from_patterns(&patterns);
 
     // Set specific test values across different patterns (using safe indices)
     // Pattern 0: 3^10 = 59049 entries, Pattern 10: 3^6 = 729 entries
@@ -588,7 +588,7 @@ fn test_integration_requirements_summary() {
 
     // Req 1.1: TD(lambda)-Leaf algorithm
     let patterns = load_patterns_array();
-    let mut eval_table = EvaluationTable::new(&patterns);
+    let mut eval_table = EvaluationTable::from_patterns(&patterns);
 
     let evaluator = Evaluator::new("patterns.csv").expect("Failed to load evaluator");
     let mut search = Search::new(evaluator, 128).expect("Failed to create search");

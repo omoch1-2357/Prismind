@@ -16,22 +16,34 @@ env_logger = "0.11"       # Logger implementation (Req 7.6)
 ctrlc = "3.4"             # Graceful shutdown signal handling (Req 12.7)
 rand = "0.9.2"            # Epsilon-greedy exploration (promoted from dev-dependency)
 
+# Phase 4: Python bindings and integration dependencies
+pyo3 = { version = "0.24", features = ["extension-module", "abi3-py38"], optional = true }
+numpy = { version = "0.24", optional = true }     # NumPy array support for Python (Req 1.9)
+crc32fast = "1.4"         # CRC32 checksum for checkpoint integrity (Req 3.7)
+flate2 = "1.1"            # Optional checkpoint compression (Req 3.9)
+serde_json = "1.0.145"
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"            # Temporary directories for testing
 
+[features]
+default = []
+pyo3 = ["dep:pyo3", "dep:numpy"]
+
 [profile.release]
 opt-level = 3
-lto = "fat"
+lto = true
 codegen-units = 1
 panic = "abort"
 
 [lib]
 name = "prismind"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "prismind"
+name = "prismind-cli"
 path = "src/main.rs"
 
 [[bench]]

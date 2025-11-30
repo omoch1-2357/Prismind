@@ -2,6 +2,13 @@
 target/
 **/*.rs.bk
 
+# Python
+**/__pycache__/
+**/*.pyc
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
 # Editors/IDE
 .vscode/
 .idea/

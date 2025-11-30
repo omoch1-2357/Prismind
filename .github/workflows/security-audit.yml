@@ -18,17 +18,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      
+
       - name: Install cargo-audit
         run: cargo install cargo-audit
-        
+
       - name: Run security audit
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: cargo audit --deny warnings
-        
+
       - name: Check for yanked crates
         uses: nick-fields/retry@v3
         with:
@@ -41,24 +41,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      
+
       - name: Install cargo-deny
         run: cargo install cargo-deny
-        
+
       - name: Check bans
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: cargo deny check bans
-        
+
       - name: Check advisories
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: cargo deny check advisories
-        
+
       - name: Check sources
         uses: nick-fields/retry@v3
         with:

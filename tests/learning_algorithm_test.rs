@@ -46,7 +46,7 @@ fn test_td_error_computation_positive_outcome() {
     // TD error = target - current evaluation
 
     let patterns = load_patterns_array();
-    let mut eval_table = EvaluationTable::new(&patterns);
+    let mut eval_table = EvaluationTable::from_patterns(&patterns);
     let mut learner = TDLearner::new(DEFAULT_LAMBDA);
     let mut adam = AdamOptimizer::new(&patterns);
 
@@ -74,7 +74,7 @@ fn test_td_error_computation_negative_outcome() {
     // Req 1.3: Test TD error for negative game outcome
 
     let patterns = load_patterns_array();
-    let mut eval_table = EvaluationTable::new(&patterns);
+    let mut eval_table = EvaluationTable::from_patterns(&patterns);
     let mut learner = TDLearner::new(DEFAULT_LAMBDA);
     let mut adam = AdamOptimizer::new(&patterns);
 
@@ -96,7 +96,7 @@ fn test_td_error_zero_for_accurate_prediction() {
     // When leaf value matches final score, TD error should be near zero
 
     let patterns = load_patterns_array();
-    let mut eval_table = EvaluationTable::new(&patterns);
+    let mut eval_table = EvaluationTable::from_patterns(&patterns);
     let mut learner = TDLearner::new(DEFAULT_LAMBDA);
     let mut adam = AdamOptimizer::new(&patterns);
 
@@ -611,7 +611,7 @@ fn test_algorithm_correctness_summary() {
 
     // Req 1.3: TD error computation
     let patterns = load_patterns_array();
-    let mut eval_table = EvaluationTable::new(&patterns);
+    let mut eval_table = EvaluationTable::from_patterns(&patterns);
     let mut learner = TDLearner::new(DEFAULT_LAMBDA);
     let mut adam = AdamOptimizer::new(&patterns);
 

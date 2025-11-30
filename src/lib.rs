@@ -15,40 +15,43 @@
 //! use prismind::board::{BitBoard, legal_moves, make_move, check_game_state, GameState};
 //! use prismind::evaluator::Evaluator;
 //!
-//! // 盤面の初期化
-//! let mut board = BitBoard::new();
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // 盤面の初期化
+//!     let mut board = BitBoard::new();
 //!
-//! // 評価関数の初期化
-//! let evaluator = Evaluator::new("patterns.csv").unwrap();
+//!     // 評価関数の初期化
+//!     let evaluator = Evaluator::new("patterns.csv")?;
 //!
-//! // ゲームループ
-//! loop {
-//!     // ゲーム状態を確認
-//!     let game_state = check_game_state(&board);
-//!     match game_state {
-//!         GameState::Playing => {
-//!             // 合法手を取得
-//!             let moves = legal_moves(&board);
-//!             if moves == 0 {
+//!     // ゲームループ
+//!     loop {
+//!         // ゲーム状態を確認
+//!         let game_state = check_game_state(&board);
+//!         match game_state {
+//!             GameState::Playing => {
+//!                 // 合法手を取得
+//!                 let moves = legal_moves(&board);
+//!                 if moves == 0 {
+//!                     break;
+//!                 }
+//!
+//!                 // 盤面を評価
+//!                 let eval = evaluator.evaluate(&board);
+//!                 println!("評価値: {}", eval);
+//!
+//!                 // 最初の合法手を実行
+//!                 let pos = moves.trailing_zeros() as u8;
+//!                 make_move(&mut board, pos)?;
+//!             }
+//!             GameState::Pass => {
+//!                 board = board.flip();
+//!             }
+//!             GameState::GameOver(score) => {
+//!                 println!("ゲーム終了: スコア = {}", score);
 //!                 break;
 //!             }
-//!
-//!             // 盤面を評価
-//!             let eval = evaluator.evaluate(&board);
-//!             println!("評価値: {}", eval);
-//!
-//!             // 最初の合法手を実行
-//!             let pos = moves.trailing_zeros() as u8;
-//!             make_move(&mut board, pos).unwrap();
-//!         }
-//!         GameState::Pass => {
-//!             board = board.flip();
-//!         }
-//!         GameState::GameOver(score) => {
-//!             println!("ゲーム終了: スコア = {}", score);
-//!             break;
 //!         }
 //!     }
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -91,6 +94,10 @@ pub mod search;
 // ARM64専用最適化モジュール（条件付きコンパイル）
 #[cfg(target_arch = "aarch64")]
 pub mod arm64;
+
+// PyO3 Python bindings module (feature-gated)
+#[cfg(feature = "pyo3")]
+pub mod python;
 
 // 再エクスポート: よく使用される型と関数をクレートルートから直接アクセス可能にする
 pub use board::{

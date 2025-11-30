@@ -578,7 +578,7 @@ for i in 0..56 {
 pub struct EvaluationTable {
     // [stage][flat_array]
     // flat_array: 全14パターンのデータを連続配置
-    data: Vec<Box<[u16]>>,       
+    data: Vec<Box<[u16]>>,
     pattern_offsets: [usize; 14],  // 各パターンの開始位置
 }
 
@@ -673,22 +673,22 @@ pub fn evaluate(&self, board: &BitBoard) -> f32 {
     let stage = board.move_count / 2;
     let indices = extract_all_patterns(board);
     let mut sum = 0.0;
-    
+
     for pattern_id in 0..14 {
         let index = indices[pattern_id];
         let offset = self.pattern_offsets[pattern_id] + index;
-        
+
         // 次のパターンをプリフェッチ
         if pattern_id < 13 {
             let next_offset = self.pattern_offsets[pattern_id + 1];
             let next_ptr = unsafe { self.data[stage].as_ptr().add(next_offset) };
             prefetch_next_pattern(next_ptr);
         }
-        
+
         let score_u16 = self.data[stage][offset];
         sum += u16_to_score(score_u16);
     }
-    
+
     if board.turn == Color::White {
         -sum
     } else {
@@ -720,7 +720,7 @@ fn cell_state_branchless(black: u64, white: u64, pos: u8, swap: bool) -> u8 {
     let is_black = ((black & bit) >> pos) as u8;
     let is_white = ((white & bit) >> pos) as u8;
     let swap_mask = swap as u8;
-    
+
     // 0=空, 1=黒, 2=白 （swap時は 1=白, 2=黒）
     is_black * (1 + swap_mask) + is_white * (2 - swap_mask)
 }
@@ -765,7 +765,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 fn bench_evaluate(c: &mut Criterion) {
     let evaluator = Evaluator::new().unwrap();
     let board = BitBoard::new();
-    
+
     c.bench_function("evaluate", |b| {
         b.iter(|| evaluator.evaluate(black_box(&board)))
     });
@@ -773,7 +773,7 @@ fn bench_evaluate(c: &mut Criterion) {
 
 fn bench_extract_all_patterns(c: &mut Criterion) {
     let board = BitBoard::new();
-    
+
     c.bench_function("extract_all_patterns", |b| {
         b.iter(|| extract_all_patterns(black_box(&board)))
     });
@@ -815,10 +815,10 @@ use thiserror::Error;
 pub enum GameError {
     #[error("Illegal move at position {0}")]
     IllegalMove(u8),
-    
+
     #[error("Position out of bounds: {0}")]
     OutOfBounds(u8),
-    
+
     #[error("Game is already over")]
     GameOver,
 }
@@ -827,10 +827,10 @@ pub enum GameError {
 pub enum PatternError {
     #[error("Failed to load patterns.csv: {0}")]
     LoadError(String),
-    
+
     #[error("Invalid pattern position: {0}")]
     InvalidPosition(u8),
-    
+
     #[error("Pattern count mismatch: expected 14, found {0}")]
     CountMismatch(usize),
 }
@@ -861,7 +861,7 @@ mod tests {
         let rot_180 = board.rotate_180();
         let rot_270 = board.rotate_270();
         let rot_360 = rot_90.rotate_90().rotate_90().rotate_90();
-        
+
         assert_eq!(board, rot_360);
     }
 
@@ -870,13 +870,13 @@ mod tests {
         // キャッシュミス率の簡易検証
         let evaluator = Evaluator::new().unwrap();
         let board = BitBoard::new();
-        
+
         let start = std::time::Instant::now();
         for _ in 0..10000 {
             black_box(evaluator.evaluate(&board));
         }
         let elapsed = start.elapsed();
-        
+
         // 35μs × 10000 = 350ms以内
         assert!(elapsed.as_millis() < 400);
     }
@@ -890,19 +890,19 @@ mod tests {
 fn test_full_game_flow() {
     let evaluator = Evaluator::new().unwrap();
     let mut board = BitBoard::new();
-    
+
     // 初期評価値
     let initial_eval = evaluator.evaluate(&board);
     assert!((initial_eval).abs() < 5.0);  // ほぼニュートラル
-    
+
     // 合法手取得
     let moves = board.legal_moves();
     assert_ne!(moves, 0);
-    
+
     // 着手実行
     let first_move = moves.trailing_zeros() as u8;
     board.make_move(first_move).unwrap();
-    
+
     // 手番確認
     assert_eq!(board.turn, Color::White);
     assert_eq!(board.move_count, 1);
@@ -945,7 +945,7 @@ fn test_full_game_flow() {
 
 **発生確率**: 高
 **影響度**: 大
-**対策**: 
+**対策**:
 - Phase 1A（Week 1）完了時点でキャッシュミス率測定
 - 目標30%超過時は即座にSoA変換実装
 - プリフェッチ距離の調整実験
@@ -967,4 +967,3 @@ fn test_full_game_flow() {
 - P0項目（必須要件）を優先実装
 - P1/P2項目（推奨/望ましい）は時間的余裕に応じて実装
 - Phase 2への影響を最小化するため、P0項目は確実に完了
-

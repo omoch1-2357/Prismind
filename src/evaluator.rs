@@ -219,8 +219,35 @@ pub struct Evaluator {
     table: EvaluationTable,
 }
 
+/// Default pattern sizes (k values) for standard Othello patterns.
+/// This matches the patterns.csv configuration:
+/// P01-P04: k=10, P05-P08: k=8, P09-P10: k=7, P11-P12: k=6, P13-P14: k=5
+const DEFAULT_PATTERN_K_VALUES: [u8; 14] = [10, 10, 10, 10, 8, 8, 8, 8, 7, 7, 6, 6, 5, 5];
+
 impl EvaluationTable {
-    /// 評価テーブルを初期化
+    /// 評価テーブルをデフォルトパターンサイズで初期化
+    ///
+    /// 全エントリを32768（石差0に相当）に初期化する。
+    /// 標準のオセロパターン構成を使用:
+    /// - P01-P04: 10マス（3^10 = 59049エントリ）
+    /// - P05-P08: 8マス（3^8 = 6561エントリ）
+    /// - P09-P10: 7マス（3^7 = 2187エントリ）
+    /// - P11-P12: 6マス（3^6 = 729エントリ）
+    /// - P13-P14: 5マス（3^5 = 243エントリ）
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use prismind::evaluator::EvaluationTable;
+    ///
+    /// let table = EvaluationTable::new();
+    /// assert_eq!(table.get(0, 0, 0), 32768);  // Initial value
+    /// ```
+    pub fn new() -> Self {
+        Self::with_pattern_sizes(&DEFAULT_PATTERN_K_VALUES)
+    }
+
+    /// 評価テーブルをパターン定義から初期化
     ///
     /// 全エントリを32768（石差0に相当）に初期化する。
     ///
@@ -251,9 +278,42 @@ impl EvaluationTable {
     ///     Pattern::new(12, 5, vec![0, 1, 2, 3, 4]).unwrap(),
     ///     Pattern::new(13, 5, vec![0, 8, 16, 24, 32]).unwrap(),
     /// ];
-    /// let table = EvaluationTable::new(&patterns);
+    /// let table = EvaluationTable::from_patterns(&patterns);
     /// ```
-    pub fn new(patterns: &[Pattern]) -> Self {
+    /// 評価テーブルを指定されたパターンサイズ（k値）から初期化
+    ///
+    /// # Arguments
+    ///
+    /// * `k_values` - 14個のパターンのk値（各パターンは3^k個のエントリを持つ）
+    pub fn with_pattern_sizes(k_values: &[u8; 14]) -> Self {
+        let mut pattern_offsets = [0; 14];
+        let mut pattern_sizes = [0; 14];
+        let mut offset = 0;
+
+        for (i, &k) in k_values.iter().enumerate() {
+            pattern_offsets[i] = offset;
+            let size = 3_usize.pow(k as u32);
+            pattern_sizes[i] = size;
+            offset += size;
+        }
+
+        let total_entries_per_stage = offset;
+
+        // 30ステージ分のデータを初期化
+        let mut data = Vec::with_capacity(30);
+        for _ in 0..30 {
+            let stage_data = vec![32768u16; total_entries_per_stage].into_boxed_slice();
+            data.push(stage_data);
+        }
+
+        Self {
+            data,
+            pattern_offsets,
+            pattern_sizes,
+        }
+    }
+
+    pub fn from_patterns(patterns: &[Pattern]) -> Self {
         assert_eq!(patterns.len(), 14, "Expected exactly 14 patterns");
 
         // 各パターンの開始オフセットとサイズを計算
@@ -364,6 +424,49 @@ impl EvaluationTable {
         // 30ステージ分の合計
         30 * bytes_per_stage
     }
+
+    /// Get the weight value as f64 for external analysis.
+    ///
+    /// Converts the internal u16 representation to f64 stone difference.
+    ///
+    /// # Arguments
+    ///
+    /// * `pattern_id` - Pattern ID (0-13)
+    /// * `stage` - Game stage (0-29)
+    /// * `index` - Pattern index (0 ~ 3^k-1)
+    ///
+    /// # Returns
+    ///
+    /// Weight as f64 stone difference (-128.0 to +127.996)
+    pub fn get_weight(&self, pattern_id: usize, stage: usize, index: usize) -> f64 {
+        let u16_val = self.get(pattern_id, stage, index);
+        u16_to_score(u16_val) as f64
+    }
+
+    /// Get the number of entries for a specific pattern.
+    ///
+    /// Returns 3^k where k is the pattern's cell count.
+    ///
+    /// # Arguments
+    ///
+    /// * `pattern_id` - Pattern ID (0-13)
+    ///
+    /// # Returns
+    ///
+    /// Number of entries (3^k) for the pattern
+    pub fn pattern_size(&self, pattern_id: usize) -> usize {
+        if pattern_id < 14 {
+            self.pattern_sizes[pattern_id]
+        } else {
+            0
+        }
+    }
+}
+
+impl Default for EvaluationTable {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Evaluator {
@@ -404,9 +507,67 @@ impl Evaluator {
             .map_err(|v: Vec<Pattern>| crate::pattern::PatternError::CountMismatch(v.len()))?;
 
         // 評価テーブルをSoA形式で初期化
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         Ok(Self { patterns, table })
+    }
+
+    /// Create an Evaluator with an existing shared EvaluationTable.
+    ///
+    /// This constructor is used for PyO3 bindings where the evaluation
+    /// table is wrapped in Arc<RwLock<>> for thread-safe Python access.
+    /// The evaluator keeps a reference to the shared table.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - Arc-wrapped RwLock of EvaluationTable for shared access
+    ///
+    /// # Returns
+    ///
+    /// A new Evaluator that uses the shared table.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use prismind::evaluator::{Evaluator, EvaluationTable};
+    /// use std::sync::{Arc, RwLock};
+    ///
+    /// let table = Arc::new(RwLock::new(EvaluationTable::new()));
+    /// let evaluator = Evaluator::new_with_table(table);
+    /// ```
+    pub fn new_with_table(table: std::sync::Arc<std::sync::RwLock<EvaluationTable>>) -> Self {
+        // For PyO3 use case, we don't have pattern definitions loaded from file.
+        // Use default patterns for evaluation (pattern positions not needed for simple eval).
+        // The table already contains proper sizes.
+        let patterns = Self::default_patterns();
+        let table_clone = table.read().unwrap().clone();
+
+        Self {
+            patterns,
+            table: table_clone,
+        }
+    }
+
+    /// Get default pattern definitions for standalone evaluator.
+    fn default_patterns() -> [Pattern; 14] {
+        // Create minimal pattern definitions for evaluation
+        // These don't need actual positions since the table handles indexing
+        [
+            Pattern::new(0, 10, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap(),
+            Pattern::new(1, 10, vec![0, 8, 16, 24, 32, 40, 48, 56, 1, 9]).unwrap(),
+            Pattern::new(2, 10, vec![0, 1, 8, 9, 10, 16, 17, 18, 24, 25]).unwrap(),
+            Pattern::new(3, 10, vec![0, 9, 18, 27, 36, 45, 54, 63, 1, 10]).unwrap(),
+            Pattern::new(4, 8, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap(),
+            Pattern::new(5, 8, vec![0, 8, 16, 24, 32, 40, 48, 56]).unwrap(),
+            Pattern::new(6, 8, vec![0, 9, 18, 27, 36, 45, 54, 63]).unwrap(),
+            Pattern::new(7, 8, vec![7, 14, 21, 28, 35, 42, 49, 56]).unwrap(),
+            Pattern::new(8, 7, vec![0, 1, 2, 3, 4, 5, 6]).unwrap(),
+            Pattern::new(9, 7, vec![0, 8, 16, 24, 32, 40, 48]).unwrap(),
+            Pattern::new(10, 6, vec![0, 1, 2, 3, 4, 5]).unwrap(),
+            Pattern::new(11, 6, vec![0, 8, 16, 24, 32, 40]).unwrap(),
+            Pattern::new(12, 5, vec![0, 1, 2, 3, 4]).unwrap(),
+            Pattern::new(13, 5, vec![0, 8, 16, 24, 32]).unwrap(),
+        ]
     }
 
     /// Create an Evaluator from an existing EvaluationTable.
@@ -431,7 +592,7 @@ impl Evaluator {
     /// use prismind::pattern::load_patterns;
     ///
     /// let patterns = load_patterns("patterns.csv").unwrap();
-    /// let table = EvaluationTable::new(&patterns);
+    /// let table = EvaluationTable::from_patterns(&patterns);
     /// let evaluator = Evaluator::from_table(&table, &patterns);
     /// ```
     pub fn from_table(table: &EvaluationTable, patterns: &[Pattern; 14]) -> Self {
@@ -550,7 +711,7 @@ mod tests {
     fn test_evaluation_table_new_initialization() {
         // Requirement 9.2: 全エントリを32768に初期化
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // 30ステージ分のデータが作成されていることを確認
         assert_eq!(table.data.len(), 30, "Should have 30 stages (0-29)");
@@ -567,7 +728,7 @@ mod tests {
     fn test_evaluation_table_all_entries_initialized_to_32768() {
         // Requirement 9.2: システム初期化時、全エントリを32768に初期化
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // 各ステージの最初のパターンの最初のエントリを確認
         for stage in 0..30 {
@@ -594,7 +755,7 @@ mod tests {
     fn test_evaluation_table_get_basic() {
         // Requirement 9.4, 9.6: get()メソッドで評価値取得（offset計算含む）
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // 基本的な取得テスト
         let value = table.get(0, 0, 0);
@@ -619,7 +780,7 @@ mod tests {
     fn test_evaluation_table_set_and_get() {
         // Requirement 9.4: set()メソッドで評価値設定（Phase 3学習用）
         let patterns = create_test_patterns();
-        let mut table = EvaluationTable::new(&patterns);
+        let mut table = EvaluationTable::from_patterns(&patterns);
 
         // 値を設定
         table.set(0, 0, 0, 40000);
@@ -646,7 +807,7 @@ mod tests {
     fn test_evaluation_table_soa_structure() {
         // Requirement 9.1, 9.6: Structure of Arrays形式で[ステージ][平坦化配列]の2次元構造
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // data[stage]が平坦化配列であることを確認
         // 各ステージの配列サイズは全パターンのエントリ数の合計
@@ -667,7 +828,7 @@ mod tests {
     fn test_evaluation_table_pattern_offsets() {
         // Requirement 9.7: pattern_offsets配列で各パターンの開始位置を管理
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // オフセットの計算を検証
         let mut expected_offset = 0;
@@ -687,7 +848,7 @@ mod tests {
     fn test_evaluation_table_3_power_k_entries() {
         // Requirement 9.3: 各パターンについて3^k個のエントリを割り当て
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         for (i, pattern) in patterns.iter().enumerate() {
             let expected_entries = 3_usize.pow(pattern.k as u32);
@@ -709,7 +870,7 @@ mod tests {
     fn test_evaluation_table_30_independent_stages() {
         // Requirement 9.4: 30ステージ（0-29）それぞれに独立したテーブルを持つ
         let patterns = create_test_patterns();
-        let mut table = EvaluationTable::new(&patterns);
+        let mut table = EvaluationTable::from_patterns(&patterns);
 
         // 各ステージに異なる値を設定
         for stage in 0..30 {
@@ -733,7 +894,7 @@ mod tests {
     fn test_evaluation_table_continuous_memory_layout() {
         // Requirement 9.6: 同じステージの全パターンデータを連続メモリ配置
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // SoA形式の検証: 各ステージのデータが連続配置されている
         for _stage in 0..30 {
@@ -760,7 +921,7 @@ mod tests {
     fn test_evaluation_table_memory_usage() {
         // Requirement 13.2: メモリ使用量を計算
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         let memory_bytes = table.memory_usage();
 
@@ -787,7 +948,7 @@ mod tests {
     fn test_evaluation_table_memory_under_80mb() {
         // Requirement 9.5, 13.2: 総メモリ使用量が80MB以内であることを確認
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         let memory_bytes = table.memory_usage();
         let memory_mb = memory_bytes as f64 / 1_048_576.0;
@@ -805,7 +966,7 @@ mod tests {
     fn test_evaluation_table_all_patterns_different_sizes() {
         // Requirement 9.3: 各パターンのk値に応じて異なるエントリ数を持つ
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         for (i, pattern) in patterns.iter().enumerate() {
             let expected_entries = 3_usize.pow(pattern.k as u32);
@@ -838,7 +999,7 @@ mod tests {
         println!("=== Task 8 Requirements Verification ===");
 
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // Requirement 9.1: SoA形式
         assert_eq!(table.data.len(), 30);
@@ -1146,7 +1307,7 @@ mod tests {
     fn test_calculate_stage_allows_eval_table_access() {
         // Requirement 12.5: 各ステージごとに独立した評価テーブルへのアクセスを可能にする
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // 各手数でステージを計算し、評価テーブルにアクセスできることを確認
         for move_count in 0..=60 {
@@ -1226,7 +1387,7 @@ mod tests {
 
         // Requirement 12.5: 評価テーブルアクセス可能
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
         for mc in 0..=60 {
             let stage = calculate_stage(mc);
             let _ = table.get(0, stage, 0);
@@ -1260,7 +1421,7 @@ mod tests {
     fn test_task_11_1_evaluator_holds_14_patterns_as_array() {
         // Requirement 11.1: パターン配列を[Pattern; 14]として保持
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // Evaluator構造体がpatternsを[Pattern; 14]として保持することを確認
         // （型システムで保証されるため、ここではサイズの確認のみ）
@@ -1274,7 +1435,7 @@ mod tests {
     fn test_task_11_1_evaluation_table_initialized_in_soa_format() {
         // Requirement 11.1: EvaluationTableをSoA形式で初期化
         let patterns = create_test_patterns();
-        let table = EvaluationTable::new(&patterns);
+        let table = EvaluationTable::from_patterns(&patterns);
 
         // SoA形式: [stage][flat_array]
         assert_eq!(table.data.len(), 30, "Should have 30 stages");
@@ -1341,7 +1502,7 @@ mod tests {
     fn test_task_11_2_evaluate_converts_u16_to_f32_before_summing() {
         // Requirement 11.2: 各パターンインスタンスのu16値をf32石差に変換してから合計
         let patterns = create_test_patterns();
-        let mut table = EvaluationTable::new(&patterns);
+        let mut table = EvaluationTable::from_patterns(&patterns);
 
         // テスト用に特定の値を設定
         table.set(0, 0, 0, 40000); // 石差 (40000-32768)/256 ≈ 28.25

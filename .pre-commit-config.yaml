@@ -1,0 +1,127 @@
+# Pre-commit hooks for Prismind
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Python formatting and linting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      # Run the formatter
+      - id: ruff-format
+        name: ruff format
+        files: ^python/.*\.py$
+      # Run the linter
+      - id: ruff
+        name: ruff check
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^python/.*\.py$
+
+  # Python type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        name: mypy type check
+        files: ^python/.*\.py$
+        args: [--strict, --ignore-missing-imports, --warn-unused-ignores]
+        additional_dependencies:
+          - types-setuptools
+
+  # Rust formatting and linting
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt
+        args: [--all, --check]
+        language: system
+        files: \.rs$
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy
+        args: [--workspace, --all-targets, --all-features, --, -D, warnings]
+        language: system
+        files: \.rs$
+        pass_filenames: false
+
+  # Forbid lint/type-check bypass patterns
+  # See docs/bypass-policy.md for approved exceptions
+  - repo: local
+    hooks:
+      # === Python bypass prevention ===
+      - id: no-type-ignore
+        name: "forbid type: ignore"
+        entry: '# type:\s*ignore'
+        language: pygrep
+        files: ^python/.*\.py$
+        exclude: ^python/tests/.*$
+
+      - id: no-noqa
+        name: forbid noqa comments
+        entry: '#\s*noqa'
+        language: pygrep
+        files: ^python/.*\.py$
+        exclude: ^python/tests/.*$
+
+      - id: no-fmt-off
+        name: "forbid fmt: off"
+        entry: '#\s*fmt:\s*(off|skip)'
+        language: pygrep
+        files: ^python/.*\.py$
+
+      # Forbid Any type annotations (lazy typing)
+      # Allowed: signal handlers (_frame: Any), TYPE_CHECKING imports
+      - id: no-any-type
+        name: forbid Any type annotations
+        entry: ':\s*Any\b|[-=]>\s*Any\b'
+        language: pygrep
+        files: ^python/.*\.py$
+        exclude: ^python/tests/.*$
+
+      # === Rust bypass prevention ===
+      # Forbid most #[allow(...)] - except too_many_arguments (API compat)
+      - id: no-allow-warnings-rs
+        name: forbid #[allow(...)] in Rust (except too_many_arguments)
+        entry: '#\[allow\((dead_code|unused|clippy::(?!too_many_arguments)|warnings)'
+        language: pygrep
+        files: \.rs$
+        exclude: (^tests/|_test\.rs$|^benches/)
+
+      - id: no-blanket-allow-rs
+        name: forbid #![allow(...)] crate-level
+        entry: '#!\[allow\('
+        language: pygrep
+        files: \.rs$
+
+      # Forbid unwrap()/expect() in production Rust
+      # Note: This check is best enforced via clippy::unwrap_used lint
+      # pygrep cannot distinguish doctest from production code
+      # Exclude entire files that have high test/doctest content
+      - id: no-unwrap-expect-rs
+        name: forbid unwrap()/expect() in production Rust
+        entry: '\.(unwrap|expect)\(\)'
+        language: pygrep
+        files: ^src/(lib|main)\.rs$
+
+      # Forbid unsafe blocks outside arm64.rs and FFI modules
+      - id: no-unsafe-rs
+        name: forbid unsafe outside approved modules
+        entry: 'unsafe\s*\{'
+        language: pygrep
+        files: ^src/.*\.rs$
+        exclude: (^src/arm64\.rs$|^src/python/.*\.rs$|^src/evaluator\.rs$)
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]

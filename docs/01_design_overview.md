@@ -122,14 +122,14 @@ score = clamp(石差 × 256.0 + 32768.0, 0.0, 65535.0)
 ```rust
 fn evaluate(board: &Board, stage: usize) -> f32 {
     let mut sum = 0.0;
-    
+
     // 4方向の回転
     for rotation in [0, 90, 180, 270] {
         let rotated = board.rotate(rotation);
-        
+
         // 白黒反転フラグ
         let swap = (rotation == 90 || rotation == 270);
-        
+
         // 14パターン抽出
         for pattern in &PATTERNS {
             let index = extract_index(rotated, pattern, swap);
@@ -137,7 +137,7 @@ fn evaluate(board: &Board, stage: usize) -> f32 {
             sum += score;
         }
     }
-    
+
     // 手番考慮
     if board.is_white_turn() {
         -sum
@@ -237,7 +237,7 @@ for t in (0..60).rev() {
 ### 5.4 TD誤差計算
 
 ```
-target_t = 
+target_t =
   if t == 最終手:
     実際の石差
   else:
@@ -310,7 +310,7 @@ param_new = param - α × m_hat / (√v_hat + ε)
 
 全エントリ: `32768`（石差0）
 
-**理由**: 
+**理由**:
 - ニュートラルなスタート
 - 対称性を保つ
 - 学習の安定性
@@ -383,7 +383,7 @@ OCI Always Free (24GB RAM) で十分余裕あり。
 ```
 checkpoint_NNNNNN.bin
   where NNNNNN = 局数（6桁、0埋め）
-  
+
 例: checkpoint_000000.bin (初期状態)
     checkpoint_100000.bin (10万局後)
     checkpoint_1000000.bin (100万局後)
@@ -539,4 +539,3 @@ othello-ai/
 4. 単体テストの作成
 5. 統合テスト
 6. 学習実行
-

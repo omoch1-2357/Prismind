@@ -75,7 +75,10 @@ pub use benchmark::{
     NUM_THREADS, SearchBenchmark, TARGET_GAMES_PER_SEC, TARGET_SEARCH_TIME_MS, TARGET_TOTAL_GAMES,
     TARGET_TRAINING_HOURS, TDUpdateBenchmark, TrainingTimeEstimator,
 };
-pub use checkpoint::{CHECKPOINT_MAGIC, CheckpointManager, CheckpointMeta};
+pub use checkpoint::{
+    CHECKPOINT_MAGIC, CHECKPOINT_MAGIC_V2, CHECKPOINT_VERSION, CheckpointHeader, CheckpointManager,
+    CheckpointMeta, EnhancedCheckpointManager, FLAG_COMPRESSED,
+};
 pub use convergence::{
     CONVERGENCE_REPORT_INTERVAL, ConvergenceMetrics, ConvergenceMonitor, IMPROVEMENT_THRESHOLD,
     MIN_WIN_RATE_VS_RANDOM, RUNNING_AVERAGE_WINDOW, STAGNATION_WINDOW, TARGET_UPDATES_PER_ENTRY,
@@ -83,8 +86,10 @@ pub use convergence::{
 pub use eligibility_trace::EligibilityTrace;
 pub use error::LearningError;
 pub use error_handler::{
+    CHECKPOINT_RETRY_DELAY_SECS, CheckpointLoadError, CheckpointRecoveryOption,
     ERROR_THRESHOLD_PERCENT, ERROR_WINDOW_SIZE, ErrorPatternSummary, ErrorRecord, ErrorTracker,
-    ErrorType, EvalRecovery, PanicCatchResult, catch_panic, save_checkpoint_with_retry,
+    ErrorType, EvalRecovery, PanicCatchResult, WATCHDOG_TIMEOUT_SECS, WatchdogStatus,
+    WorkerHeartbeat, WorkerStatus, WorkerWatchdog, catch_panic, save_checkpoint_with_retry,
 };
 pub use game_history::{
     GameHistory, MAX_MOVES_PER_GAME, MoveRecord as HistoryMoveRecord, NUM_PATTERN_INSTANCES,
@@ -94,9 +99,11 @@ pub use logger::{
     DetailedStats, EVAL_DIVERGENCE_THRESHOLD, SyncTrainingLogger, TrainingLogger,
 };
 pub use memory::{
-    EXPECTED_ADAM_MB, EXPECTED_ELIGIBILITY_TRACE_KB, EXPECTED_EVAL_TABLE_MB,
-    EXPECTED_GAME_HISTORY_KB, MAX_TT_SIZE_MB as MEMORY_MAX_TT_SIZE_MB, MEMORY_TOLERANCE,
-    MIN_TT_SIZE_MB as MEMORY_MIN_TT_SIZE_MB, MemoryBreakdown, MemoryMonitor, TOTAL_MEMORY_BUDGET,
+    DEFAULT_MEMORY_BUDGET_MB, EXPECTED_ADAM_MB, EXPECTED_ELIGIBILITY_TRACE_KB,
+    EXPECTED_EVAL_TABLE_MB, EXPECTED_GAME_HISTORY_KB, FRAGMENTATION_THRESHOLD_PERCENT,
+    FragmentationMetrics, GameHistoryManager, MAX_TT_SIZE_MB as MEMORY_MAX_TT_SIZE_MB,
+    MEMORY_TOLERANCE, MIN_TT_SIZE_MB as MEMORY_MIN_TT_SIZE_MB, MemoryBreakdown,
+    MemoryBudgetManager, MemoryMonitor, MemoryReport, SparseTraceManager, TOTAL_MEMORY_BUDGET,
     validate_adam_memory, validate_eval_table_memory, validate_total_memory, validate_tt_size,
     verify_game_history_released, verify_sparse_eligibility_trace,
 };
@@ -105,8 +112,9 @@ pub use self_play::{DEFAULT_SEARCH_TIME_MS, EpsilonSchedule, GameResult, play_ga
 pub use shared_evaluator::SharedEvaluator;
 pub use td_learner::{MoveRecord, TDLearner, TDUpdateStats};
 pub use training_engine::{
-    DEFAULT_NUM_THREADS, DEFAULT_TT_SIZE_MB, MAX_MEMORY_BUDGET, MIN_TT_SIZE_MB,
-    TOTAL_PATTERN_ENTRIES, TrainingConfig, TrainingEngine, TrainingStats,
+    DEFAULT_CALLBACK_INTERVAL, DEFAULT_NUM_THREADS, DEFAULT_TT_SIZE_MB, MAX_MEMORY_BUDGET,
+    MIN_TT_SIZE_MB, TOTAL_PATTERN_ENTRIES, TrainingConfig, TrainingEngine, TrainingProgress,
+    TrainingResult, TrainingState, TrainingStats,
 };
 
 /// Error types for the learning module
