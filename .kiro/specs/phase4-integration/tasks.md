@@ -316,20 +316,20 @@
 
 ## Task 11. Python Training Scripts
 
-- [ ] 11.1 Create train.py script with command-line interface
+- [x] 11.1 Create train.py script with command-line interface
   - Accept command-line arguments for target games, checkpoint interval, search time, and epsilon schedule
   - Support --resume flag to continue from latest checkpoint
   - Output progress to both console and log file
   - Implement proper signal handling for graceful shutdown on Ctrl+C
   - _Requirements: 10.1, 10.2, 10.3, 10.8_
 
-- [ ] 11.2 (P) Create monitor.py real-time dashboard script
+- [x] 11.2 (P) Create monitor.py real-time dashboard script
   - Display real-time training statistics in formatted terminal dashboard
   - Support plotting training curves showing stone difference and win rate over games
   - Connect to training via progress callbacks
   - _Requirements: 10.4, 10.5_
 
-- [ ] 11.3 (P) Create evaluate.py model evaluation script
+- [x] 11.3 (P) Create evaluate.py model evaluation script
   - Test trained model against random player and report win rate
   - Test trained model against simple heuristic (corner/edge priority) and report win rate
   - Accept checkpoint path as command-line argument
