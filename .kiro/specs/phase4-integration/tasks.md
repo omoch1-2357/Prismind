@@ -97,28 +97,28 @@
 
 ## Task 4. Enhanced Training Logger
 
-- [ ] 4.1 Extend TrainingLogger with configurable log levels
+- [x] 4.1 Extend TrainingLogger with configurable log levels
   - Add LogLevel enum supporting debug, info, warning, error levels
   - Implement log filtering based on configured level
   - Add constructor parameter for setting initial log level
   - Support runtime log level changes
   - _Requirements: 4.5_
 
-- [ ] 4.2 Implement JSON format output for machine-readable logging
+- [x] 4.2 Implement JSON format output for machine-readable logging
   - Add json_output configuration flag to TrainingLogger
   - Format log entries as JSON objects with timestamp, level, event type, and data fields
   - Write JSON logs to timestamped files with format logs/training_YYYYMMDD_HHMMSS.log
   - Support both JSON and human-readable formats based on configuration
   - _Requirements: 4.4, 4.8_
 
-- [ ] 4.3 (P) Implement real-time and detailed statistics logging
+- [x] 4.3 (P) Implement real-time and detailed statistics logging
   - Log real-time statistics every 100 games: stone difference, win rates, move count, elapsed time
   - Log detailed statistics every 10,000 games: evaluation distribution (mean, std, min, max), search depth stats, TT hit rate
   - Log checkpoint summaries with cumulative training statistics
   - Log estimated time remaining based on current throughput
   - _Requirements: 4.1, 4.2, 4.3, 4.6_
 
-- [ ] 4.4 (P) Add divergence warning detection and logging
+- [x] 4.4 (P) Add divergence warning detection and logging
   - Detect NaN, infinity, or out-of-range evaluation values
   - Emit immediate warning with pattern ID, stage, index, and anomalous value
   - Track divergence events for error summary
