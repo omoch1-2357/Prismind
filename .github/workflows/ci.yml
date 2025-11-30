@@ -86,14 +86,14 @@ jobs:
         with:
           timeout_minutes: 15
           max_attempts: 3
-          command: cargo test --workspace --all-features --verbose
+          command: cargo test --workspace --verbose
 
       - name: Run doc tests
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: cargo test --doc --workspace --all-features --verbose
+          command: cargo test --doc --workspace --verbose
 
   # Performance tests on release build (runs after debug tests pass)
   test-release:
@@ -121,7 +121,7 @@ jobs:
         with:
           timeout_minutes: 15
           max_attempts: 3
-          command: cargo test --release --workspace --all-features --verbose
+          command: cargo test --release --workspace --verbose
 
   # Benchmarks (runs on stable only)
   bench:
@@ -176,9 +176,47 @@ jobs:
         with:
           timeout_minutes: 15
           max_attempts: 3
-          command: cargo doc --workspace --all-features --no-deps --document-private-items
+          command: cargo doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: -D warnings
+
+  # Python/PyO3 integration tests
+  python-test:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: python-test-cache
+
+      - name: Install maturin and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin pytest numpy
+
+      - name: Build and install prismind
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          command: maturin develop --features pyo3
+
+      - name: Run Python tests
+        run: pytest python/tests/ -v
 
   # Release build verification
   build-release:
@@ -240,7 +278,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, test, test-release, bench, docs, build-release, cross-compile-arm64]
+    needs: [lint, test, test-release, bench, docs, python-test, build-release, cross-compile-arm64]
     if: always()
     steps:
       - name: Check all jobs status
@@ -250,6 +288,7 @@ jobs:
              [ "${{ needs.test-release.result }}" != "success" ] || \
              [ "${{ needs.bench.result }}" != "success" ] || \
              [ "${{ needs.docs.result }}" != "success" ] || \
+             [ "${{ needs.python-test.result }}" != "success" ] || \
              [ "${{ needs.build-release.result }}" != "success" ] || \
              [ "${{ needs.cross-compile-arm64.result }}" != "success" ]; then
             echo "❌ One or more CI jobs failed"
