@@ -357,43 +357,43 @@
 
 ## Task 13. Integration Tests
 
-- [ ] 13.1 Implement Python-to-Rust round-trip tests
+- [x] 13.1 Implement Python-to-Rust round-trip tests
   - Test all PyO3 methods return valid results from Python calls
   - Verify data type conversions work correctly (board arrays, statistics dictionaries)
   - Test error handling returns appropriate Python exceptions
   - _Requirements: 12.1_
 
-- [ ] 13.2 Implement checkpoint state preservation tests
+- [x] 13.2 Implement checkpoint state preservation tests
   - Save checkpoint, load checkpoint, verify all training state is identical
   - Test compression and non-compression modes
   - Verify checksum validation detects corruption
   - _Requirements: 12.2_
 
-- [ ] 13.3 Implement parallel training correctness tests
+- [x] 13.3 Implement parallel training correctness tests
   - Execute parallel training with multiple threads
   - Verify no data races using MIRI or thread sanitizer where applicable
   - Confirm game statistics are consistent across runs
   - _Requirements: 12.3_
 
-- [ ] 13.4 Implement memory budget tests
+- [x] 13.4 Implement memory budget tests
   - Monitor memory usage during extended test runs
   - Verify total usage stays within 600 MB budget
   - Test automatic TT size reduction when approaching limit
   - _Requirements: 12.4_
 
-- [ ] 13.5 Implement graceful shutdown tests
+- [x] 13.5 Implement graceful shutdown tests
   - Send interrupt signal during training
   - Verify checkpoint is saved before exit
   - Verify training can resume from saved state
   - _Requirements: 12.5_
 
-- [ ] 13.6 Implement convergence metrics tests
+- [x] 13.6 Implement convergence metrics tests
   - Run 1,000 game training sample
   - Verify convergence metrics are computed and reported correctly
   - Test stagnation detection with controlled input
   - _Requirements: 12.6_
 
-- [ ] 13.7 Implement performance threshold tests
+- [x] 13.7 Implement performance threshold tests
   - Run benchmarks and verify minimum thresholds are met
   - Test game throughput >= 4.6 games/second
   - Test checkpoint operations complete within time limits
