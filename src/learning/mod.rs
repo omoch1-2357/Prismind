@@ -99,9 +99,11 @@ pub use logger::{
     DetailedStats, EVAL_DIVERGENCE_THRESHOLD, SyncTrainingLogger, TrainingLogger,
 };
 pub use memory::{
-    EXPECTED_ADAM_MB, EXPECTED_ELIGIBILITY_TRACE_KB, EXPECTED_EVAL_TABLE_MB,
-    EXPECTED_GAME_HISTORY_KB, MAX_TT_SIZE_MB as MEMORY_MAX_TT_SIZE_MB, MEMORY_TOLERANCE,
-    MIN_TT_SIZE_MB as MEMORY_MIN_TT_SIZE_MB, MemoryBreakdown, MemoryMonitor, TOTAL_MEMORY_BUDGET,
+    DEFAULT_MEMORY_BUDGET_MB, EXPECTED_ADAM_MB, EXPECTED_ELIGIBILITY_TRACE_KB,
+    EXPECTED_EVAL_TABLE_MB, EXPECTED_GAME_HISTORY_KB, FRAGMENTATION_THRESHOLD_PERCENT,
+    FragmentationMetrics, GameHistoryManager, MAX_TT_SIZE_MB as MEMORY_MAX_TT_SIZE_MB,
+    MEMORY_TOLERANCE, MIN_TT_SIZE_MB as MEMORY_MIN_TT_SIZE_MB, MemoryBreakdown,
+    MemoryBudgetManager, MemoryMonitor, MemoryReport, SparseTraceManager, TOTAL_MEMORY_BUDGET,
     validate_adam_memory, validate_eval_table_memory, validate_total_memory, validate_tt_size,
     verify_game_history_released, verify_sparse_eligibility_trace,
 };

@@ -270,19 +270,19 @@
 
 ## Task 9. Memory Management Enhancements
 
-- [ ] 9.1 (P) Implement configurable memory budget enforcement
+- [x] 9.1 (P) Implement configurable memory budget enforcement
   - Add configurable total memory budget (default: 600 MB)
   - Track allocation by component during initialization
   - Automatically reduce transposition table size if budget would be exceeded
   - _Requirements: 7.1, 7.2, 7.3_
 
-- [ ] 9.2 (P) Implement memory allocation tracking
+- [x] 9.2 (P) Implement memory allocation tracking
   - Track memory allocation by component: pattern tables, Adam optimizer, transposition table
   - Provide memory report method showing current usage breakdown
   - Detect and log memory fragmentation with metrics
   - _Requirements: 7.4, 7.7_
 
-- [ ] 9.3 (P) Implement sparse eligibility trace storage
+- [x] 9.3 (P) Implement sparse eligibility trace storage
   - Optimize eligibility trace memory with sparse storage approach
   - Minimize per-game memory overhead during TD updates
   - Ensure game history is deallocated promptly after TD update completion
