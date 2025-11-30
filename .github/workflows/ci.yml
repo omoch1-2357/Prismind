@@ -203,8 +203,10 @@ jobs:
         with:
           shared-key: python-test-cache
 
-      - name: Install maturin and test dependencies
+      - name: Create virtualenv and install dependencies
         run: |
+          python -m venv .venv
+          source .venv/bin/activate
           python -m pip install --upgrade pip
           pip install maturin pytest numpy
 
@@ -213,10 +215,14 @@ jobs:
         with:
           timeout_minutes: 15
           max_attempts: 3
-          command: maturin develop --features pyo3
+          command: |
+            source .venv/bin/activate
+            maturin develop --features pyo3
 
       - name: Run Python tests
-        run: pytest python/tests/ -v
+        run: |
+          source .venv/bin/activate
+          pytest python/tests/ -v
 
   # Release build verification
   build-release:
