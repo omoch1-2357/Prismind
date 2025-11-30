@@ -250,8 +250,8 @@ jobs:
 
       - name: Verify binary size (should be optimized with LTO)
         run: |
-          ls -lh target/release/prismind
-          size target/release/prismind || file target/release/prismind
+          ls -lh target/release/prismind-cli
+          size target/release/prismind-cli || file target/release/prismind-cli
 
   # ARM64 cross-compilation check (validates ARM64 optimization settings)
   cross-compile-arm64:
