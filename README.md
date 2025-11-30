@@ -14,7 +14,11 @@ High-performance Othello AI engine with pattern-based evaluation and reinforceme
 ### From Source (Rust)
 
 ```bash
+# Development/benchmarks (panic=unwind)
 cargo build --release
+
+# Production binary with smaller size (panic=abort)
+cargo build --profile release-binary
 ```
 
 ### Python Bindings

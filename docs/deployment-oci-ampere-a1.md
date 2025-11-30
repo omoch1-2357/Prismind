@@ -136,8 +136,8 @@ Build the release version:
 # Using Makefile
 make release
 
-# Or directly with cargo
-cargo build --release
+# Or directly with cargo (production profile with panic=abort for smaller binary)
+cargo build --profile release-binary
 
 # Or using build script
 ./build.sh release
@@ -146,9 +146,9 @@ cargo build --release
 ### 3. Verify Build
 
 ```bash
-# Check binary
-ls -lh target/release/libprismind.so
-ls -lh target/release/prismind-cli
+# Check binary (note: release-binary profile outputs to target/release-binary/)
+ls -lh target/release-binary/libprismind.so
+ls -lh target/release-binary/prismind-cli
 
 # Run tests
 cargo test --release
