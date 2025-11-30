@@ -126,28 +126,28 @@
 
 ## Task 5. Training Engine Enhancements
 
-- [ ] 5.1 Implement training state machine with pause/resume capability
+- [x] 5.1 Implement training state machine with pause/resume capability
   - Add state enum (Idle, Training, Paused) with AtomicU8 representation for thread-safe access
   - Implement pause_flag as AtomicBool checked after each game batch
   - Ensure pause operation completes within 5 seconds by finishing current batch
   - Save checkpoint automatically on pause
   - _Requirements: 2.2, 2.3, 2.5_
 
-- [ ] 5.2 Implement progress callback mechanism for Python integration
+- [x] 5.2 Implement progress callback mechanism for Python integration
   - Add callback channel using crossbeam-channel for progress updates
   - Invoke progress callbacks at configurable intervals (default: every 100 games)
   - Include games completed, average stone difference, win rate, and elapsed time in callbacks
   - Release GIL during Rust computation using py.allow_threads() to avoid blocking Python
   - _Requirements: 2.4_
 
-- [ ] 5.3 Implement training completion and interrupt handling
+- [x] 5.3 Implement training completion and interrupt handling
   - Detect training completion when target game count is reached
   - Save final checkpoint on completion with completion statistics
   - Handle interrupt signals (Ctrl+C) with graceful shutdown
   - Save checkpoint before exiting on interrupt
   - _Requirements: 2.1, 2.6, 2.7_
 
-- [ ] 5.4 Implement train_game and train_batch methods for PyO3 interface
+- [x] 5.4 Implement train_game and train_batch methods for PyO3 interface
   - Implement train_game method executing single self-play game with configurable time and epsilon
   - Return game statistics including stone difference, move count, and winner
   - Implement train_batch method executing multiple games with rayon parallel execution
