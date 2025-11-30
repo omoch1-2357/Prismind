@@ -35,7 +35,12 @@ pyo3 = ["dep:pyo3", "dep:numpy"]
 opt-level = 3
 lto = true
 codegen-units = 1
-panic = "abort"
+# Note: panic = "abort" removed to allow benchmarks to compile with ctrlc/nix crates
+# The impact on binary size is minimal (~1-2%)
+
+[profile.release-binary]
+inherits = "release"
+panic = "abort"  # Use this profile for production binaries: cargo build --profile release-binary
 
 [lib]
 name = "prismind"
