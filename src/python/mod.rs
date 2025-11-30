@@ -40,6 +40,9 @@ mod checkpoint_manager;
 mod training_manager;
 
 #[cfg(feature = "pyo3")]
+mod statistics_manager;
+
+#[cfg(feature = "pyo3")]
 pub use evaluator::PyEvaluator;
 
 #[cfg(feature = "pyo3")]
@@ -48,9 +51,13 @@ pub use checkpoint_manager::{PyCheckpointManager, PyLearningState};
 #[cfg(feature = "pyo3")]
 pub use training_manager::{PyTrainingManager, PyTrainingResult};
 
-// Placeholder types for future implementation (Tasks 8, 10)
+#[cfg(feature = "pyo3")]
+pub use statistics_manager::PyStatisticsManager;
+
+// Placeholder types for future implementation (Task 10)
 // PyCheckpointManager is now fully implemented in checkpoint_manager.rs
 // PyTrainingManager and PyTrainingResult are implemented in training_manager.rs (Task 6)
+// PyStatisticsManager is now fully implemented in statistics_manager.rs (Task 8)
 
 /// PyO3 module entry point for the Prismind Python extension.
 ///
@@ -70,34 +77,17 @@ fn _prismind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTrainingManager>()?;
     m.add_class::<PyTrainingResult>()?;
 
+    // Register PyStatisticsManager (Task 8 - implemented)
+    m.add_class::<PyStatisticsManager>()?;
+
     // Register placeholder classes (implemented as simple PyO3 classes)
     // These will be fully implemented in subsequent tasks
-    m.add_class::<PyStatisticsManager>()?;
     m.add_class::<PyDebugModule>()?;
 
     // Add module version from Cargo package
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())
-}
-
-/// Statistics and monitoring aggregator.
-///
-/// Provides unified access to convergence metrics, benchmarks, and memory usage.
-#[cfg(feature = "pyo3")]
-#[pyclass]
-pub struct PyStatisticsManager {
-    // Will be implemented in Task 8
-}
-
-#[cfg(feature = "pyo3")]
-#[pymethods]
-impl PyStatisticsManager {
-    /// Create a new statistics manager.
-    #[new]
-    pub fn new() -> PyResult<Self> {
-        Ok(Self {})
-    }
 }
 
 /// Debug utilities for training diagnostics.

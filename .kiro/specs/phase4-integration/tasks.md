@@ -228,13 +228,13 @@
 
 ## Task 8. PyStatisticsManager Implementation
 
-- [ ] 8.1 Create PyStatisticsManager class aggregating monitoring components
+- [x] 8.1 Create PyStatisticsManager class aggregating monitoring components
   - Create PyStatisticsManager wrapping ConvergenceMonitor, BenchmarkRunner, MemoryMonitor, and TrainingLogger
   - Use Arc for shared access to monitoring components
   - Provide unified interface for all statistics and metrics
   - _Requirements: 4.1, 5.8, 6.8, 7.8_
 
-- [ ] 8.2 (P) Implement convergence metrics access
+- [x] 8.2 (P) Implement convergence metrics access
   - Implement get_convergence_metrics returning dictionary with stone_diff_avg, eval_variance, pattern_coverage, stagnation_detected
   - Calculate rolling average of stone difference over last 10,000 games
   - Track evaluation stability via variance over time windows
@@ -242,26 +242,26 @@
   - Detect stagnation when variance shows no decrease for 50,000 consecutive games
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
 
-- [ ] 8.3 (P) Implement pattern update coverage monitoring
+- [x] 8.3 (P) Implement pattern update coverage monitoring
   - Count pattern table entries that have received updates
   - Warn when coverage falls below 90% after 500,000 games
   - Report average update count per pattern entry at checkpoints
   - Warn about undertrained patterns when average updates fall significantly below expected rate (233 at 1M games)
   - _Requirements: 5.3, 5.4, 5.6, 5.7_
 
-- [ ] 8.4 (P) Implement memory usage reporting
+- [x] 8.4 (P) Implement memory usage reporting
   - Implement get_memory_report returning breakdown by component
   - Report total usage and per-component values (pattern tables, Adam state, TT, misc)
   - Express values in megabytes for readability
   - _Requirements: 7.1, 7.2, 7.4, 7.8_
 
-- [ ] 8.5 (P) Implement benchmark execution and reporting
+- [x] 8.5 (P) Implement benchmark execution and reporting
   - Implement run_benchmarks method with iteration count parameter
   - Measure and report games per second, TD update latency, checkpoint save/load duration, CPU utilization
   - Compare against target thresholds and identify bottlenecks when below targets
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7_
 
-- [ ] 8.6 Implement statistics export and ETA calculation
+- [x] 8.6 Implement statistics export and ETA calculation
   - Implement export_json method writing statistics to file
   - Implement get_eta method calculating estimated time remaining based on throughput
   - Support continuous profiling mode for regression detection
