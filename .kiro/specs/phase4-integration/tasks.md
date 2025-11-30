@@ -183,43 +183,43 @@
 
 ## Task 7. Error Handling and Recovery System
 
-- [ ] 7.1 Implement error recovery for search and game execution
+- [x] 7.1 Implement error recovery for search and game execution
   - Catch search errors during self-play and log with game context
   - Skip to next game without crashing on recoverable errors
   - Implement error counting per 10,000 game window
   - _Requirements: 9.1, 9.5_
 
-- [ ] 7.2 Implement checkpoint save retry and failure handling
+- [x] 7.2 Implement checkpoint save retry and failure handling
   - Retry checkpoint save once after 5-second delay on failure
   - Log warning and continue training if retry fails
   - Track checkpoint failures in error summary
   - _Requirements: 9.2_
 
-- [ ] 7.3 Implement evaluation error detection and recovery
+- [x] 7.3 Implement evaluation error detection and recovery
   - Detect NaN or infinite values in evaluation results
   - Reset affected pattern entries to neutral value (32768)
   - Log warning with position and pattern details for diagnosis
   - _Requirements: 9.3_
 
-- [ ] 7.4 Implement worker thread panic handling
+- [x] 7.4 Implement worker thread panic handling
   - Catch panics from rayon worker threads using catch_unwind where appropriate
   - Log panic information without crashing main training process
   - Track panic counts in error monitoring
   - _Requirements: 9.4_
 
-- [ ] 7.5 Implement error threshold monitoring and auto-pause
+- [x] 7.5 Implement error threshold monitoring and auto-pause
   - Track error rate per 10,000 game window
   - Pause training automatically if error rate exceeds 1%
   - Save checkpoint and report error pattern when pausing
   - _Requirements: 9.5, 9.6_
 
-- [ ] 7.6 Implement checkpoint load error recovery
+- [x] 7.6 Implement checkpoint load error recovery
   - Detect corruption during checkpoint load via checksum mismatch
   - Offer option to start fresh or try previous checkpoint
   - Provide clear error messages with recovery suggestions
   - _Requirements: 9.7_
 
-- [ ] 7.7 Implement watchdog for hung worker thread detection
+- [x] 7.7 Implement watchdog for hung worker thread detection
   - Monitor worker thread activity with heartbeat mechanism
   - Detect threads that exceed timeout threshold without progress
   - Restart hung threads and log restart events

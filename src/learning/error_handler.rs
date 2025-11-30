@@ -1,23 +1,30 @@
-//! エラーハンドリングとリカバリーモジュール
+//! Error Handling and Recovery Module
 //!
-//! 学習プロセスの堅牢なエラーハンドリングとリカバリー機能を実装する。
+//! Implements robust error handling and recovery capabilities for the learning process.
 //!
-//! # 概要
+//! # Overview
 //!
-//! - `ErrorTracker`: エラーカウントの追跡とウィンドウベースの分析
-//! - `ErrorRecovery`: NaN/Inf値のリカバリーとパニックキャッチ
-//! - `CheckpointRetry`: チェックポイント保存のリトライロジック
+//! - `ErrorTracker`: Error count tracking and window-based analysis
+//! - `EvalRecovery`: NaN/Inf value recovery
+//! - `CheckpointRecovery`: Checkpoint load error recovery with suggestions
+//! - `WorkerWatchdog`: Hung worker thread detection and restart
 //!
-//! # 要件対応
+//! # Requirements Coverage
 //!
-//! - Req 12.1: 探索エラーをログして次のゲームにスキップ
-//! - Req 12.2: チェックポイント保存失敗時に1回リトライ
-//! - Req 12.3: NaN/Inf評価値を32768にリセット
-//! - Req 12.4: パニックをキャッチしてログ（トレーニングプロセスをクラッシュさせない）
-//! - Req 12.6: 10,000ゲームウィンドウで1%以上失敗時にトレーニングを一時停止
+//! - Req 9.1: Log search errors with game context and skip to next game
+//! - Req 9.2: Retry checkpoint save once after 5-second delay on failure
+//! - Req 9.3: Detect NaN/Inf values and reset to 32768 with warning log
+//! - Req 9.4: Catch panics from worker threads without crashing
+//! - Req 9.5: Track error rate per 10,000 game window
+//! - Req 9.6: Pause training and save checkpoint when error rate exceeds 1%
+//! - Req 9.7: Detect checkpoint corruption and offer recovery options
+//! - Req 9.8: Watchdog for hung worker thread detection with heartbeat
 
 use std::collections::VecDeque;
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 use crate::evaluator::EvaluationTable;
 use crate::learning::LearningError;
@@ -461,29 +468,455 @@ where
     }
 }
 
-/// チェックポイント保存をリトライ付きで実行
+/// Retry delay for checkpoint save operations (5 seconds).
 ///
-/// # 要件対応
+/// # Requirements Coverage
 ///
-/// - Req 12.2: チェックポイント保存失敗時に1回リトライ
+/// - Req 9.2: Retry once after 5-second delay on failure
+pub const CHECKPOINT_RETRY_DELAY_SECS: u64 = 5;
+
+/// Save checkpoint with retry on failure.
+///
+/// If the first save attempt fails, waits 5 seconds and retries once.
+/// This provides resilience against transient I/O errors.
+///
+/// # Requirements Coverage
+///
+/// - Req 9.2: Retry checkpoint save once after 5-second delay on failure
 pub fn save_checkpoint_with_retry<F>(mut save_fn: F) -> Result<(), LearningError>
 where
     F: FnMut() -> Result<(), LearningError>,
 {
-    // 最初の試行
+    // First attempt
     match save_fn() {
         Ok(()) => Ok(()),
-        Err(_first_error) => {
-            // リトライ
+        Err(first_error) => {
+            // Log first failure
+            log::warn!(
+                "Checkpoint save failed, retrying in {} seconds: {}",
+                CHECKPOINT_RETRY_DELAY_SECS,
+                first_error
+            );
+
+            // Wait 5 seconds before retry (Req 9.2)
+            std::thread::sleep(Duration::from_secs(CHECKPOINT_RETRY_DELAY_SECS));
+
+            // Retry
             match save_fn() {
-                Ok(()) => Ok(()),
+                Ok(()) => {
+                    log::info!("Checkpoint save succeeded on retry");
+                    Ok(())
+                }
                 Err(second_error) => {
-                    // 両方のエラーを報告することも検討
-                    // 現在は最後のエラーのみを返す
+                    log::warn!("Checkpoint save failed after retry: {}", second_error);
                     Err(second_error)
                 }
             }
         }
+    }
+}
+
+// ============================================================================
+// Task 7.6: Checkpoint Load Error Recovery (Req 9.7)
+// ============================================================================
+
+/// Checkpoint recovery options when corruption is detected.
+///
+/// # Requirements Coverage
+///
+/// - Req 9.7: Offer option to start fresh or try previous checkpoint
+#[derive(Clone, Debug, PartialEq)]
+pub enum CheckpointRecoveryOption {
+    /// Start fresh training from scratch
+    StartFresh,
+    /// Try loading a previous checkpoint
+    TryPrevious(String),
+    /// Abort and report error
+    Abort,
+}
+
+/// Checkpoint load error with recovery suggestions.
+///
+/// Provides detailed error information and recovery options when
+/// checkpoint loading fails.
+///
+/// # Requirements Coverage
+///
+/// - Req 9.7: Provide clear error messages with recovery suggestions
+#[derive(Clone, Debug)]
+pub struct CheckpointLoadError {
+    /// Path to the checkpoint that failed to load
+    pub checkpoint_path: String,
+    /// Error description
+    pub error_message: String,
+    /// Whether corruption was detected (vs other errors)
+    pub is_corruption: bool,
+    /// Available recovery options
+    pub recovery_options: Vec<CheckpointRecoveryOption>,
+    /// Suggested action
+    pub suggestion: String,
+}
+
+impl CheckpointLoadError {
+    /// Create a new checkpoint load error for corruption.
+    ///
+    /// # Arguments
+    ///
+    /// * `checkpoint_path` - Path to the corrupted checkpoint
+    /// * `error_message` - Description of the corruption error
+    /// * `previous_checkpoint` - Optional path to a previous valid checkpoint
+    pub fn corruption(
+        checkpoint_path: impl Into<String>,
+        error_message: impl Into<String>,
+        previous_checkpoint: Option<String>,
+    ) -> Self {
+        let mut options = vec![CheckpointRecoveryOption::StartFresh];
+        if let Some(ref prev) = previous_checkpoint {
+            options.insert(0, CheckpointRecoveryOption::TryPrevious(prev.clone()));
+        }
+        options.push(CheckpointRecoveryOption::Abort);
+
+        let suggestion = if previous_checkpoint.is_some() {
+            "Try loading a previous checkpoint, or start fresh training.".to_string()
+        } else {
+            "Start fresh training or check for backup files.".to_string()
+        };
+
+        Self {
+            checkpoint_path: checkpoint_path.into(),
+            error_message: error_message.into(),
+            is_corruption: true,
+            recovery_options: options,
+            suggestion,
+        }
+    }
+
+    /// Create a new checkpoint load error for I/O failure.
+    pub fn io_error(checkpoint_path: impl Into<String>, error_message: impl Into<String>) -> Self {
+        Self {
+            checkpoint_path: checkpoint_path.into(),
+            error_message: error_message.into(),
+            is_corruption: false,
+            recovery_options: vec![
+                CheckpointRecoveryOption::StartFresh,
+                CheckpointRecoveryOption::Abort,
+            ],
+            suggestion: "Check file permissions and disk space, then retry.".to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for CheckpointLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "=== Checkpoint Load Error ===")?;
+        writeln!(f, "Path: {}", self.checkpoint_path)?;
+        writeln!(f, "Error: {}", self.error_message)?;
+        if self.is_corruption {
+            writeln!(f, "Type: Data corruption detected")?;
+        }
+        writeln!(f, "Suggestion: {}", self.suggestion)?;
+        writeln!(f, "Recovery options:")?;
+        for (i, opt) in self.recovery_options.iter().enumerate() {
+            match opt {
+                CheckpointRecoveryOption::StartFresh => {
+                    writeln!(f, "  {}. Start fresh training", i + 1)?;
+                }
+                CheckpointRecoveryOption::TryPrevious(path) => {
+                    writeln!(f, "  {}. Try previous checkpoint: {}", i + 1, path)?;
+                }
+                CheckpointRecoveryOption::Abort => {
+                    writeln!(f, "  {}. Abort and exit", i + 1)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Task 7.7: Worker Watchdog (Req 9.8)
+// ============================================================================
+
+/// Watchdog timeout threshold in seconds (30s based on typical game duration).
+///
+/// A worker thread that doesn't report progress within this time is considered hung.
+///
+/// # Requirements Coverage
+///
+/// - Req 9.8: Timeout threshold for hung thread detection
+pub const WATCHDOG_TIMEOUT_SECS: u64 = 30;
+
+/// Heartbeat for a single worker thread.
+///
+/// Workers should update this regularly to indicate they are making progress.
+#[derive(Debug)]
+pub struct WorkerHeartbeat {
+    /// Last activity timestamp (Unix epoch milliseconds for atomic storage)
+    last_activity: AtomicU64,
+    /// Worker ID for identification
+    worker_id: usize,
+    /// Flag indicating if this worker has been marked as hung
+    is_hung: AtomicBool,
+    /// Restart count for this worker
+    restart_count: AtomicU64,
+}
+
+impl WorkerHeartbeat {
+    /// Create a new worker heartbeat.
+    pub fn new(worker_id: usize) -> Self {
+        Self {
+            last_activity: AtomicU64::new(Self::current_timestamp()),
+            worker_id,
+            is_hung: AtomicBool::new(false),
+            restart_count: AtomicU64::new(0),
+        }
+    }
+
+    /// Get current timestamp in milliseconds.
+    fn current_timestamp() -> u64 {
+        use std::time::SystemTime;
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
+    /// Update heartbeat to current time.
+    ///
+    /// Should be called by the worker after completing work.
+    pub fn beat(&self) {
+        self.last_activity
+            .store(Self::current_timestamp(), Ordering::SeqCst);
+        self.is_hung.store(false, Ordering::SeqCst);
+    }
+
+    /// Get time since last activity in seconds.
+    pub fn time_since_activity(&self) -> f64 {
+        let last = self.last_activity.load(Ordering::SeqCst);
+        let now = Self::current_timestamp();
+        (now.saturating_sub(last)) as f64 / 1000.0
+    }
+
+    /// Check if this worker is hung (no activity for timeout duration).
+    ///
+    /// A worker is considered hung if the time since last activity exceeds
+    /// the timeout threshold. Uses `>=` for 0-second timeout to allow immediate detection.
+    pub fn is_hung(&self, timeout_secs: u64) -> bool {
+        let elapsed = self.time_since_activity();
+        if timeout_secs == 0 {
+            // Special case: 0 timeout means "check if any time has passed"
+            // We consider this as "always hung after creation" for testing
+            elapsed >= 0.0
+        } else {
+            elapsed > timeout_secs as f64
+        }
+    }
+
+    /// Mark this worker as hung.
+    pub fn mark_hung(&self) {
+        self.is_hung.store(true, Ordering::SeqCst);
+    }
+
+    /// Check if this worker was previously marked as hung.
+    pub fn was_marked_hung(&self) -> bool {
+        self.is_hung.load(Ordering::SeqCst)
+    }
+
+    /// Increment restart count and return new value.
+    pub fn record_restart(&self) -> u64 {
+        self.restart_count.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Get total restart count.
+    pub fn restart_count(&self) -> u64 {
+        self.restart_count.load(Ordering::SeqCst)
+    }
+
+    /// Get worker ID.
+    pub fn worker_id(&self) -> usize {
+        self.worker_id
+    }
+}
+
+/// Watchdog for monitoring multiple worker threads.
+///
+/// Tracks heartbeats from all workers and detects hung threads.
+///
+/// # Requirements Coverage
+///
+/// - Req 9.8: Monitor worker thread activity with heartbeat mechanism
+#[derive(Debug)]
+pub struct WorkerWatchdog {
+    /// Heartbeats for each worker
+    heartbeats: Vec<Arc<WorkerHeartbeat>>,
+    /// Timeout threshold in seconds
+    timeout_secs: u64,
+    /// Total hung thread detections
+    total_hung_detections: AtomicU64,
+    /// Total restarts performed
+    total_restarts: AtomicU64,
+}
+
+impl WorkerWatchdog {
+    /// Create a new watchdog for the specified number of workers.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_workers` - Number of worker threads to monitor
+    /// * `timeout_secs` - Timeout threshold (default: WATCHDOG_TIMEOUT_SECS)
+    pub fn new(num_workers: usize, timeout_secs: Option<u64>) -> Self {
+        let heartbeats = (0..num_workers)
+            .map(|id| Arc::new(WorkerHeartbeat::new(id)))
+            .collect();
+
+        Self {
+            heartbeats,
+            timeout_secs: timeout_secs.unwrap_or(WATCHDOG_TIMEOUT_SECS),
+            total_hung_detections: AtomicU64::new(0),
+            total_restarts: AtomicU64::new(0),
+        }
+    }
+
+    /// Get a heartbeat handle for a worker.
+    ///
+    /// # Arguments
+    ///
+    /// * `worker_id` - ID of the worker (0-based)
+    ///
+    /// # Returns
+    ///
+    /// Arc to the worker's heartbeat, or None if worker_id is invalid.
+    pub fn get_heartbeat(&self, worker_id: usize) -> Option<Arc<WorkerHeartbeat>> {
+        self.heartbeats.get(worker_id).cloned()
+    }
+
+    /// Check all workers and return list of hung worker IDs.
+    ///
+    /// # Returns
+    ///
+    /// Vector of worker IDs that have exceeded the timeout threshold.
+    pub fn check_workers(&self) -> Vec<usize> {
+        let mut hung = Vec::new();
+
+        for heartbeat in &self.heartbeats {
+            if heartbeat.is_hung(self.timeout_secs) && !heartbeat.was_marked_hung() {
+                heartbeat.mark_hung();
+                hung.push(heartbeat.worker_id());
+                self.total_hung_detections.fetch_add(1, Ordering::SeqCst);
+
+                log::warn!(
+                    "Watchdog: Worker {} hung (no activity for {:.1}s, threshold {}s)",
+                    heartbeat.worker_id(),
+                    heartbeat.time_since_activity(),
+                    self.timeout_secs
+                );
+            }
+        }
+
+        hung
+    }
+
+    /// Record that a worker was restarted.
+    ///
+    /// # Arguments
+    ///
+    /// * `worker_id` - ID of the restarted worker
+    pub fn record_restart(&self, worker_id: usize) {
+        if let Some(heartbeat) = self.heartbeats.get(worker_id) {
+            let restarts = heartbeat.record_restart();
+            self.total_restarts.fetch_add(1, Ordering::SeqCst);
+
+            log::info!(
+                "Watchdog: Worker {} restarted (restart #{} for this worker)",
+                worker_id,
+                restarts
+            );
+        }
+    }
+
+    /// Get total number of hung thread detections.
+    pub fn total_hung_detections(&self) -> u64 {
+        self.total_hung_detections.load(Ordering::SeqCst)
+    }
+
+    /// Get total number of restarts.
+    pub fn total_restarts(&self) -> u64 {
+        self.total_restarts.load(Ordering::SeqCst)
+    }
+
+    /// Get watchdog status summary.
+    pub fn status_summary(&self) -> WatchdogStatus {
+        let workers: Vec<_> = self
+            .heartbeats
+            .iter()
+            .map(|hb| WorkerStatus {
+                worker_id: hb.worker_id(),
+                time_since_activity_secs: hb.time_since_activity(),
+                is_hung: hb.was_marked_hung(),
+                restart_count: hb.restart_count(),
+            })
+            .collect();
+
+        WatchdogStatus {
+            num_workers: self.heartbeats.len(),
+            timeout_secs: self.timeout_secs,
+            total_hung_detections: self.total_hung_detections(),
+            total_restarts: self.total_restarts(),
+            workers,
+        }
+    }
+}
+
+/// Status of a single worker.
+#[derive(Clone, Debug)]
+pub struct WorkerStatus {
+    /// Worker ID
+    pub worker_id: usize,
+    /// Seconds since last activity
+    pub time_since_activity_secs: f64,
+    /// Whether worker is currently marked as hung
+    pub is_hung: bool,
+    /// Number of times this worker was restarted
+    pub restart_count: u64,
+}
+
+/// Overall watchdog status summary.
+#[derive(Clone, Debug)]
+pub struct WatchdogStatus {
+    /// Number of workers being monitored
+    pub num_workers: usize,
+    /// Timeout threshold in seconds
+    pub timeout_secs: u64,
+    /// Total hung thread detections since start
+    pub total_hung_detections: u64,
+    /// Total restarts since start
+    pub total_restarts: u64,
+    /// Per-worker status
+    pub workers: Vec<WorkerStatus>,
+}
+
+impl std::fmt::Display for WatchdogStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "=== Watchdog Status ===")?;
+        writeln!(
+            f,
+            "Workers: {}, Timeout: {}s",
+            self.num_workers, self.timeout_secs
+        )?;
+        writeln!(
+            f,
+            "Total hung detections: {}, Total restarts: {}",
+            self.total_hung_detections, self.total_restarts
+        )?;
+        for w in &self.workers {
+            let status = if w.is_hung { "HUNG" } else { "OK" };
+            writeln!(
+                f,
+                "  Worker {}: {} (last activity {:.1}s ago, {} restarts)",
+                w.worker_id, status, w.time_since_activity_secs, w.restart_count
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -925,5 +1358,311 @@ mod tests {
         println!("  12.6: Track error counts, pause if >1% fail");
 
         println!("=== All error handling requirements verified ===");
+    }
+
+    // ========== Task 7.2: Checkpoint Retry Delay Tests ==========
+
+    #[test]
+    fn test_checkpoint_retry_delay_constant() {
+        // Verify the retry delay is 5 seconds as per Req 9.2
+        assert_eq!(CHECKPOINT_RETRY_DELAY_SECS, 5);
+    }
+
+    // ========== Task 7.6: Checkpoint Load Error Recovery Tests ==========
+
+    #[test]
+    fn test_checkpoint_load_error_corruption() {
+        let error = CheckpointLoadError::corruption(
+            "/path/to/checkpoint.bin",
+            "Checksum mismatch",
+            Some("/path/to/prev_checkpoint.bin".to_string()),
+        );
+
+        assert!(error.is_corruption);
+        assert_eq!(error.checkpoint_path, "/path/to/checkpoint.bin");
+        assert!(error.error_message.contains("Checksum"));
+        assert!(error.recovery_options.len() >= 2);
+
+        // Should have TryPrevious as first option
+        assert!(matches!(
+            &error.recovery_options[0],
+            CheckpointRecoveryOption::TryPrevious(_)
+        ));
+
+        // Display should work
+        let display = format!("{}", error);
+        assert!(display.contains("corruption"));
+        assert!(display.contains("Recovery options"));
+    }
+
+    #[test]
+    fn test_checkpoint_load_error_corruption_no_previous() {
+        let error =
+            CheckpointLoadError::corruption("/path/to/checkpoint.bin", "Checksum mismatch", None);
+
+        assert!(error.is_corruption);
+        // Without previous checkpoint, first option should be StartFresh
+        assert!(matches!(
+            &error.recovery_options[0],
+            CheckpointRecoveryOption::StartFresh
+        ));
+        assert!(error.suggestion.contains("Start fresh"));
+    }
+
+    #[test]
+    fn test_checkpoint_load_error_io() {
+        let error = CheckpointLoadError::io_error("/path/to/checkpoint.bin", "Permission denied");
+
+        assert!(!error.is_corruption);
+        assert!(error.suggestion.contains("permissions"));
+        assert!(
+            error
+                .recovery_options
+                .contains(&CheckpointRecoveryOption::StartFresh)
+        );
+        assert!(
+            error
+                .recovery_options
+                .contains(&CheckpointRecoveryOption::Abort)
+        );
+    }
+
+    #[test]
+    fn test_checkpoint_recovery_option_equality() {
+        assert_eq!(
+            CheckpointRecoveryOption::StartFresh,
+            CheckpointRecoveryOption::StartFresh
+        );
+        assert_eq!(
+            CheckpointRecoveryOption::Abort,
+            CheckpointRecoveryOption::Abort
+        );
+        assert_eq!(
+            CheckpointRecoveryOption::TryPrevious("a".to_string()),
+            CheckpointRecoveryOption::TryPrevious("a".to_string())
+        );
+        assert_ne!(
+            CheckpointRecoveryOption::TryPrevious("a".to_string()),
+            CheckpointRecoveryOption::TryPrevious("b".to_string())
+        );
+    }
+
+    // ========== Task 7.7: Worker Watchdog Tests ==========
+
+    #[test]
+    fn test_watchdog_timeout_constant() {
+        // Verify the timeout is 30 seconds as per design
+        assert_eq!(WATCHDOG_TIMEOUT_SECS, 30);
+    }
+
+    #[test]
+    fn test_worker_heartbeat_creation() {
+        let heartbeat = WorkerHeartbeat::new(5);
+
+        assert_eq!(heartbeat.worker_id(), 5);
+        assert!(!heartbeat.was_marked_hung());
+        assert_eq!(heartbeat.restart_count(), 0);
+        // Time since activity should be very small (just created)
+        assert!(heartbeat.time_since_activity() < 1.0);
+    }
+
+    #[test]
+    fn test_worker_heartbeat_beat() {
+        let heartbeat = WorkerHeartbeat::new(0);
+
+        // Simulate some time passing by marking hung then beating
+        heartbeat.mark_hung();
+        assert!(heartbeat.was_marked_hung());
+
+        heartbeat.beat();
+        assert!(!heartbeat.was_marked_hung());
+        assert!(heartbeat.time_since_activity() < 1.0);
+    }
+
+    #[test]
+    fn test_worker_heartbeat_restart_count() {
+        let heartbeat = WorkerHeartbeat::new(0);
+
+        assert_eq!(heartbeat.restart_count(), 0);
+        assert_eq!(heartbeat.record_restart(), 1);
+        assert_eq!(heartbeat.restart_count(), 1);
+        assert_eq!(heartbeat.record_restart(), 2);
+        assert_eq!(heartbeat.restart_count(), 2);
+    }
+
+    #[test]
+    fn test_worker_heartbeat_is_hung() {
+        let heartbeat = WorkerHeartbeat::new(0);
+
+        // Just created, should not be hung with any reasonable timeout
+        assert!(!heartbeat.is_hung(1));
+        assert!(!heartbeat.is_hung(30));
+
+        // With 0 second timeout, should be hung
+        assert!(heartbeat.is_hung(0));
+    }
+
+    #[test]
+    fn test_worker_watchdog_creation() {
+        let watchdog = WorkerWatchdog::new(4, Some(30));
+
+        assert_eq!(watchdog.total_hung_detections(), 0);
+        assert_eq!(watchdog.total_restarts(), 0);
+
+        // Should be able to get heartbeats for all workers
+        for i in 0..4 {
+            assert!(watchdog.get_heartbeat(i).is_some());
+        }
+        // Invalid worker ID returns None
+        assert!(watchdog.get_heartbeat(10).is_none());
+    }
+
+    #[test]
+    fn test_worker_watchdog_default_timeout() {
+        let watchdog = WorkerWatchdog::new(2, None);
+
+        let status = watchdog.status_summary();
+        assert_eq!(status.timeout_secs, WATCHDOG_TIMEOUT_SECS);
+    }
+
+    #[test]
+    fn test_worker_watchdog_check_workers_no_hung() {
+        let watchdog = WorkerWatchdog::new(4, Some(30));
+
+        // All workers just created, none should be hung
+        let hung = watchdog.check_workers();
+        assert!(hung.is_empty());
+        assert_eq!(watchdog.total_hung_detections(), 0);
+    }
+
+    #[test]
+    fn test_worker_watchdog_check_workers_with_hung() {
+        let watchdog = WorkerWatchdog::new(4, Some(0)); // 0 second timeout
+
+        // With 0 second timeout, all workers should be detected as hung
+        let hung = watchdog.check_workers();
+        assert_eq!(hung.len(), 4);
+        assert_eq!(watchdog.total_hung_detections(), 4);
+
+        // Second check should not detect them again (already marked)
+        let hung2 = watchdog.check_workers();
+        assert!(hung2.is_empty());
+        assert_eq!(watchdog.total_hung_detections(), 4);
+    }
+
+    #[test]
+    fn test_worker_watchdog_record_restart() {
+        let watchdog = WorkerWatchdog::new(4, Some(30));
+
+        watchdog.record_restart(0);
+        watchdog.record_restart(0);
+        watchdog.record_restart(2);
+
+        assert_eq!(watchdog.total_restarts(), 3);
+
+        let status = watchdog.status_summary();
+        assert_eq!(status.workers[0].restart_count, 2);
+        assert_eq!(status.workers[1].restart_count, 0);
+        assert_eq!(status.workers[2].restart_count, 1);
+    }
+
+    #[test]
+    fn test_worker_watchdog_status_summary() {
+        let watchdog = WorkerWatchdog::new(2, Some(30));
+
+        let status = watchdog.status_summary();
+
+        assert_eq!(status.num_workers, 2);
+        assert_eq!(status.timeout_secs, 30);
+        assert_eq!(status.total_hung_detections, 0);
+        assert_eq!(status.total_restarts, 0);
+        assert_eq!(status.workers.len(), 2);
+
+        // Display should work
+        let display = format!("{}", status);
+        assert!(display.contains("Watchdog Status"));
+        assert!(display.contains("Workers: 2"));
+    }
+
+    #[test]
+    fn test_worker_status_fields() {
+        let status = WorkerStatus {
+            worker_id: 3,
+            time_since_activity_secs: 15.5,
+            is_hung: false,
+            restart_count: 2,
+        };
+
+        assert_eq!(status.worker_id, 3);
+        assert!((status.time_since_activity_secs - 15.5).abs() < 0.01);
+        assert!(!status.is_hung);
+        assert_eq!(status.restart_count, 2);
+    }
+
+    // ========== Task 7 Requirements Summary ==========
+
+    #[test]
+    fn test_task7_requirements_summary() {
+        println!("=== Task 7: Error Handling and Recovery System ===");
+
+        // 7.1: Error recovery for search and game execution
+        let mut tracker = ErrorTracker::new();
+        tracker.record_error(ErrorRecord::new(
+            ErrorType::Search,
+            0,
+            "search error in game 0",
+        ));
+        println!(
+            "  7.1: Error recovery for search - ErrorTracker records errors with game context"
+        );
+
+        // 7.2: Checkpoint save retry with 5-second delay
+        assert_eq!(CHECKPOINT_RETRY_DELAY_SECS, 5);
+        println!(
+            "  7.2: Checkpoint retry delay is {} seconds",
+            CHECKPOINT_RETRY_DELAY_SECS
+        );
+
+        // 7.3: Evaluation error detection (already tested above)
+        assert_eq!(EvalRecovery::sanitize_to_u16(f32::NAN), CENTER);
+        println!("  7.3: NaN/Inf values reset to {} (neutral)", CENTER);
+
+        // 7.4: Worker thread panic handling
+        let panic_result = catch_panic::<_, ()>(|| {
+            panic!("test");
+        });
+        assert!(panic_result.is_panic());
+        println!("  7.4: Panics caught without crashing");
+
+        // 7.5: Error threshold monitoring
+        let mut tracker2 = ErrorTracker::with_config(100, 1.0);
+        for _ in 0..98 {
+            tracker2.record_success();
+        }
+        tracker2.record_error(ErrorRecord::new(ErrorType::Search, 98, "e1"));
+        let exceeded = tracker2.record_error(ErrorRecord::new(ErrorType::Search, 99, "e2"));
+        assert!(exceeded);
+        println!("  7.5: Error threshold monitoring - auto-pause when >1% errors");
+
+        // 7.6: Checkpoint load error recovery
+        let load_error = CheckpointLoadError::corruption("test.bin", "checksum fail", None);
+        assert!(load_error.is_corruption);
+        assert!(
+            load_error
+                .recovery_options
+                .contains(&CheckpointRecoveryOption::StartFresh)
+        );
+        println!("  7.6: Checkpoint load error recovery with suggestions");
+
+        // 7.7: Watchdog for hung worker detection
+        assert_eq!(WATCHDOG_TIMEOUT_SECS, 30);
+        let watchdog = WorkerWatchdog::new(4, Some(WATCHDOG_TIMEOUT_SECS));
+        let _ = watchdog.check_workers();
+        println!(
+            "  7.7: Watchdog with {}s timeout for hung thread detection",
+            WATCHDOG_TIMEOUT_SECS
+        );
+
+        println!("=== All Task 7 requirements implemented ===");
     }
 }

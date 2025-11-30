@@ -86,8 +86,10 @@ pub use convergence::{
 pub use eligibility_trace::EligibilityTrace;
 pub use error::LearningError;
 pub use error_handler::{
+    CHECKPOINT_RETRY_DELAY_SECS, CheckpointLoadError, CheckpointRecoveryOption,
     ERROR_THRESHOLD_PERCENT, ERROR_WINDOW_SIZE, ErrorPatternSummary, ErrorRecord, ErrorTracker,
-    ErrorType, EvalRecovery, PanicCatchResult, catch_panic, save_checkpoint_with_retry,
+    ErrorType, EvalRecovery, PanicCatchResult, WATCHDOG_TIMEOUT_SECS, WatchdogStatus,
+    WorkerHeartbeat, WorkerStatus, WorkerWatchdog, catch_panic, save_checkpoint_with_retry,
 };
 pub use game_history::{
     GameHistory, MAX_MOVES_PER_GAME, MoveRecord as HistoryMoveRecord, NUM_PATTERN_INSTANCES,
