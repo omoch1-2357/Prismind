@@ -156,26 +156,26 @@
 
 ## Task 6. PyTrainingManager Implementation
 
-- [ ] 6.1 Create PyTrainingManager class with training control
+- [x] 6.1 Create PyTrainingManager class with training control
   - Create PyTrainingManager class wrapping TrainingEngine with Mutex for thread-safe access
   - Implement start_training method accepting target games, checkpoint interval, callback interval, search time, and epsilon
   - Implement is_training_active method returning current training status
   - Implement get_state method returning string state ("idle", "training", "paused")
   - _Requirements: 2.1, 2.5_
 
-- [ ] 6.2 Implement pause and resume functionality
+- [x] 6.2 Implement pause and resume functionality
   - Implement pause_training method that signals pause and waits for current batch
   - Return game count when paused for tracking progress
   - Implement resume_training method that loads latest checkpoint and continues
   - _Requirements: 2.2, 2.3_
 
-- [ ] 6.3 (P) Implement progress callback and configuration
+- [x] 6.3 (P) Implement progress callback and configuration
   - Implement set_progress_callback method accepting Python callable
   - Define callback signature as fn(games: int, stone_diff: float, win_rate: float, elapsed_secs: float)
   - Implement configure method for runtime parameter adjustment
   - _Requirements: 2.4, 1.7_
 
-- [ ] 6.4 Create PyTrainingResult class for completion data
+- [x] 6.4 Create PyTrainingResult class for completion data
   - Create PyTrainingResult class with fields for completion statistics
   - Include games_completed, final_stone_diff, win rates (black/white/draw), elapsed time, games per second, error count
   - Use pyo3(get) attributes for Python attribute access

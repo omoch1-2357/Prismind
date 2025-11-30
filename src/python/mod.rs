@@ -37,13 +37,20 @@ mod evaluator;
 mod checkpoint_manager;
 
 #[cfg(feature = "pyo3")]
+mod training_manager;
+
+#[cfg(feature = "pyo3")]
 pub use evaluator::PyEvaluator;
 
 #[cfg(feature = "pyo3")]
 pub use checkpoint_manager::{PyCheckpointManager, PyLearningState};
 
-// Placeholder types for future implementation (Tasks 6, 8, 10)
+#[cfg(feature = "pyo3")]
+pub use training_manager::{PyTrainingManager, PyTrainingResult};
+
+// Placeholder types for future implementation (Tasks 8, 10)
 // PyCheckpointManager is now fully implemented in checkpoint_manager.rs
+// PyTrainingManager and PyTrainingResult are implemented in training_manager.rs (Task 6)
 
 /// PyO3 module entry point for the Prismind Python extension.
 ///
@@ -55,13 +62,16 @@ fn _prismind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register PyEvaluator class
     m.add_class::<PyEvaluator>()?;
 
-    // Register PyCheckpointManager and PyLearningState (Task 3.6 - implemented)
+    // Register PyCheckpointManager and PyLearningState (Task 3 - implemented)
     m.add_class::<PyCheckpointManager>()?;
     m.add_class::<PyLearningState>()?;
 
+    // Register PyTrainingManager and PyTrainingResult (Task 6 - implemented)
+    m.add_class::<PyTrainingManager>()?;
+    m.add_class::<PyTrainingResult>()?;
+
     // Register placeholder classes (implemented as simple PyO3 classes)
     // These will be fully implemented in subsequent tasks
-    m.add_class::<PyTrainingManager>()?;
     m.add_class::<PyStatisticsManager>()?;
     m.add_class::<PyDebugModule>()?;
 
@@ -69,37 +79,6 @@ fn _prismind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
     Ok(())
-}
-
-// Placeholder PyO3 classes - will be fully implemented in subsequent tasks
-
-/// Training session manager for controlling training lifecycle.
-///
-/// Provides start, pause, resume functionality for long-running training sessions.
-#[cfg(feature = "pyo3")]
-#[pyclass]
-pub struct PyTrainingManager {
-    // Will be implemented in Task 6
-}
-
-#[cfg(feature = "pyo3")]
-#[pymethods]
-impl PyTrainingManager {
-    /// Create a new training manager.
-    #[new]
-    pub fn new() -> PyResult<Self> {
-        Ok(Self {})
-    }
-
-    /// Check if training is currently active.
-    pub fn is_training_active(&self) -> bool {
-        false
-    }
-
-    /// Get current training state.
-    pub fn get_state(&self) -> String {
-        "idle".to_string()
-    }
 }
 
 /// Statistics and monitoring aggregator.
