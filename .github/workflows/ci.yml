@@ -246,12 +246,13 @@ jobs:
         with:
           timeout_minutes: 20
           max_attempts: 3
-          command: cargo build --release --verbose
+          # Use release-binary profile for production builds (panic=abort for smaller size)
+          command: cargo build --profile release-binary --verbose
 
-      - name: Verify binary size (should be optimized with LTO)
+      - name: Verify binary size (should be optimized with LTO + panic=abort)
         run: |
-          ls -lh target/release/prismind-cli
-          size target/release/prismind-cli || file target/release/prismind-cli
+          ls -lh target/release-binary/prismind-cli
+          size target/release-binary/prismind-cli || file target/release-binary/prismind-cli
 
   # ARM64 cross-compilation check (validates ARM64 optimization settings)
   cross-compile-arm64:
