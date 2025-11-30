@@ -56,9 +56,9 @@ fn legal_moves(board: &Board) -> u64 {
     let player = board.current_bitboard();
     let opponent = board.opponent_bitboard();
     let empty = !(player | opponent);
-    
+
     let mut moves = 0u64;
-    
+
     // 8方向それぞれについて
     for &dir in &DIRECTIONS {
         let mut candidates = shift(opponent, dir) & player;
@@ -68,7 +68,7 @@ fn legal_moves(board: &Board) -> u64 {
             candidates &= opponent;
         }
     }
-    
+
     moves
 }
 
@@ -86,16 +86,16 @@ fn make_move(&mut self, pos: u8) {
     let bit = 1u64 << pos;
     let player = self.current_bitboard_mut();
     let opponent = self.opponent_bitboard_mut();
-    
+
     *player |= bit;
-    
+
     // 8方向それぞれで石を返す
     for &dir in &DIRECTIONS {
         let flipped = find_flipped_stones(bit, *player, *opponent, dir);
         *player |= flipped;
         *opponent &= !flipped;
     }
-    
+
     self.turn = self.turn.opposite();
 }
 ```
@@ -161,7 +161,7 @@ fn extract_pattern_index(
 ) -> usize {
     let mut index = 0;
     let base = 3;
-    
+
     for (i, &pos) in pattern.positions.iter().enumerate() {
         let bit = 1u64 << pos;
         let state = if black & bit != 0 {
@@ -171,10 +171,10 @@ fn extract_pattern_index(
         } else {
             0  // 空
         };
-        
+
         index += state * base.pow(i as u32);
     }
-    
+
     index
 }
 ```
@@ -191,11 +191,11 @@ struct PrecomputedPatterns {
 fn extract_all_pattern_indices(board: &Board) -> [usize; 56] {
     let mut indices = [0; 56];
     let mut idx = 0;
-    
+
     for rotation in 0..4 {
         let (black_rot, white_rot) = board.rotate(rotation);
         let swap = rotation == 1 || rotation == 3;  // 90°または270°
-        
+
         for pattern_id in 0..14 {
             indices[idx] = extract_pattern_index(
                 black_rot,
@@ -206,7 +206,7 @@ fn extract_all_pattern_indices(board: &Board) -> [usize; 56] {
             idx += 1;
         }
     }
-    
+
     indices
 }
 ```
@@ -226,18 +226,18 @@ struct Evaluator {
 impl Evaluator {
     fn new() -> Self {
         let mut tables = Vec::new();
-        
+
         for pattern in &PATTERNS {
             let entries_per_stage = 3usize.pow(pattern.k as u32);
             let mut pattern_table = Vec::new();
-            
+
             for _ in 0..30 {  // 30ステージ
                 pattern_table.push(vec![32768u16; entries_per_stage]);
             }
-            
+
             tables.push(pattern_table);
         }
-        
+
         Self { tables }
     }
 }
@@ -250,14 +250,14 @@ impl Evaluator {
     fn evaluate(&self, board: &Board) -> f32 {
         let stage = board.move_count() / 2;  // 0-29
         let indices = extract_all_pattern_indices(board);
-        
+
         let mut sum = 0.0;
         for (i, &index) in indices.iter().enumerate() {
             let pattern_id = i % 14;
             let score_u16 = self.tables[pattern_id][stage][index];
             sum += u16_to_score(score_u16);
         }
-        
+
         // 手番考慮
         if board.turn == Color::White {
             -sum
@@ -315,23 +315,23 @@ impl TranspositionTable {
             current_age: 0,
         }
     }
-    
+
     fn probe(&self, hash: u64) -> Option<TTEntry> {
         let index = (hash as usize) % self.size;
         self.entries[index]
     }
-    
+
     fn store(&mut self, hash: u64, entry: TTEntry) {
         let index = (hash as usize) % self.size;
-        
+
         // 置換戦略: 常に上書き、または深さ・世代で判断
         if let Some(existing) = self.entries[index] {
-            if existing.depth > entry.depth && 
+            if existing.depth > entry.depth &&
                existing.age == self.current_age {
                 return;  // より深い探索結果を優先
             }
         }
-        
+
         self.entries[index] = Some(entry);
     }
 }
@@ -350,17 +350,17 @@ impl ZobristTable {
     fn new() -> Self {
         use rand::{SeedableRng, Rng};
         let mut rng = rand::rngs::StdRng::seed_from_u64(123456789);
-        
+
         Self {
             black: [0; 64].map(|_| rng.gen()),
             white: [0; 64].map(|_| rng.gen()),
             turn: rng.gen(),
         }
     }
-    
+
     fn hash(&self, board: &Board) -> u64 {
         let mut hash = 0u64;
-        
+
         for pos in 0..64 {
             let bit = 1u64 << pos;
             if board.black & bit != 0 {
@@ -369,11 +369,11 @@ impl ZobristTable {
                 hash ^= self.white[pos];
             }
         }
-        
+
         if board.turn == Color::White {
             hash ^= self.turn;
         }
-        
+
         hash
     }
 }
@@ -393,7 +393,7 @@ fn alpha_beta(
 ) -> (i32, Option<u8>) {
     let original_alpha = alpha;
     let hash = zobrist.hash(board);
-    
+
     // 置換表プローブ
     if let Some(entry) = tt.probe(hash) {
         if entry.hash == hash && entry.depth >= depth {
@@ -407,13 +407,13 @@ fn alpha_beta(
             }
         }
     }
-    
+
     // 深さ0または終端ノード
     if depth <= 0 || board.is_game_over() {
         let score = (evaluator.evaluate(board) * 100.0) as i32;
         return (score, None);
     }
-    
+
     let moves = board.legal_moves();
     if moves == 0 {
         // パス
@@ -422,30 +422,30 @@ fn alpha_beta(
         board.undo_pass();
         return (-score, None);
     }
-    
+
     // Move Ordering
     let ordered_moves = order_moves(moves, board, tt, hash);
-    
+
     let mut best_move = None;
     let mut best_score = i32::MIN;
-    
+
     for mv in ordered_moves {
         let undo_info = board.make_move(mv);
         let (score, _) = alpha_beta(board, depth - 1, -beta, -alpha, evaluator, tt, zobrist);
         let score = -score;
         board.undo_move(undo_info);
-        
+
         if score > best_score {
             best_score = score;
             best_move = Some(mv);
         }
-        
+
         alpha = alpha.max(score);
         if alpha >= beta {
             break;  // βカット
         }
     }
-    
+
     // 置換表に保存
     let bound = if best_score <= original_alpha {
         Bound::Upper
@@ -454,7 +454,7 @@ fn alpha_beta(
     } else {
         Bound::Exact
     };
-    
+
     tt.store(hash, TTEntry {
         hash,
         depth: depth as i8,
@@ -463,7 +463,7 @@ fn alpha_beta(
         best_move: best_move.unwrap_or(255),
         age: tt.current_age,
     });
-    
+
     (best_score, best_move)
 }
 ```
@@ -483,24 +483,24 @@ fn mtdf(
     let mut upper_bound = i32::MAX;
     let mut lower_bound = i32::MIN;
     let mut best_move = None;
-    
+
     while lower_bound < upper_bound {
         let beta = if g == lower_bound { g + 1 } else { g };
         let (score, mv) = alpha_beta(board, depth, beta - 1, beta, evaluator, tt, zobrist);
-        
+
         if let Some(m) = mv {
             best_move = Some(m);
         }
-        
+
         if score < beta {
             upper_bound = score;
         } else {
             lower_bound = score;
         }
-        
+
         g = score;
     }
-    
+
     (g, best_move)
 }
 ```
@@ -519,26 +519,26 @@ fn iterative_deepening(
     let mut best_move = 0u8;
     let mut best_score = 0i32;
     let mut guess = (evaluator.evaluate(board) * 100.0) as i32;
-    
+
     for depth in 1..60 {
         if start.elapsed().as_millis() as u64 >= time_limit_ms {
             break;
         }
-        
+
         let (score, mv) = mtdf(board, depth, guess, evaluator, tt, zobrist);
-        
+
         if let Some(m) = mv {
             best_move = m;
             best_score = score;
             guess = score;
         }
-        
+
         // 時間チェック
         if start.elapsed().as_millis() as u64 >= time_limit_ms * 80 / 100 {
             break;  // 80%使用で終了
         }
     }
-    
+
     (best_score, best_move)
 }
 ```
@@ -553,42 +553,42 @@ fn order_moves(
     hash: u64,
 ) -> Vec<u8> {
     let mut move_list = Vec::new();
-    
+
     for pos in 0..64 {
         if moves & (1 << pos) != 0 {
             move_list.push(pos);
         }
     }
-    
+
     // 優先順位付け
     move_list.sort_by_key(|&pos| {
         let mut priority = 0;
-        
+
         // 1. 置換表の最善手
         if let Some(entry) = tt.probe(hash) {
             if entry.best_move == pos {
                 return -10000;
             }
         }
-        
+
         // 2. 角
         if is_corner(pos) {
             priority -= 1000;
         }
-        
+
         // 3. 角の隣（X打ち）を避ける
         if is_x_square(pos) {
             priority += 500;
         }
-        
+
         // 4. 辺
         if is_edge(pos) {
             priority -= 100;
         }
-        
+
         priority
     });
-    
+
     move_list
 }
 
@@ -632,17 +632,17 @@ impl EligibilityTrace {
             traces: HashMap::new(),
         }
     }
-    
+
     fn update(&mut self, lambda: f32) {
         for (_, trace) in self.traces.iter_mut() {
             *trace *= lambda;
         }
     }
-    
+
     fn increment(&mut self, pattern_id: usize, stage: usize, index: usize) {
         *self.traces.entry((pattern_id, stage, index)).or_insert(0.0) += 1.0;
     }
-    
+
     fn get(&self, pattern_id: usize, stage: usize, index: usize) -> f32 {
         *self.traces.get(&(pattern_id, stage, index)).unwrap_or(&0.0)
     }
@@ -665,7 +665,7 @@ fn play_self_game(
         pattern_indices: Vec::new(),
         stages: Vec::new(),
     };
-    
+
     while !board.is_game_over() && board.move_count() < 60 {
         // ε-greedy
         let (leaf_value, best_move) = if rng.gen::<f32>() < epsilon {
@@ -677,16 +677,16 @@ fn play_self_game(
             // 探索
             searcher.search(&board, evaluator)
         };
-        
+
         // 履歴に保存
         history.states.push(board.clone());
         history.leaf_values.push(leaf_value);
         history.pattern_indices.push(extract_all_pattern_indices(&board));
         history.stages.push(board.move_count() / 2);
-        
+
         board.make_move(best_move);
     }
-    
+
     history
 }
 ```
@@ -703,18 +703,18 @@ fn td_update(
 ) {
     let n = history.states.len();
     let mut traces = EligibilityTrace::new();
-    
+
     // 逆順に更新
     for t in (0..n).rev() {
         let stage = history.stages[t];
         let pattern_indices = &history.pattern_indices[t];
-        
+
         // Eligibility Traceを更新
         for (i, &index) in pattern_indices.iter().enumerate() {
             let pattern_id = i % 14;
             traces.increment(pattern_id, stage, index);
         }
-        
+
         // TD誤差計算
         let current_value = history.leaf_values[t];
         let target = if t == n - 1 {
@@ -724,15 +724,15 @@ fn td_update(
             // TD(λ)ターゲット
             lambda * final_score + (1.0 - lambda) * next_value
         };
-        
+
         let td_error = target - current_value;
-        
+
         // 各パターンエントリを更新
         for (i, &index) in pattern_indices.iter().enumerate() {
             let pattern_id = i % 14;
             let trace = traces.get(pattern_id, stage, index);
             let gradient = td_error * trace;
-            
+
             // Adam更新
             let current_score = u16_to_score(evaluator.tables[pattern_id][stage][index]);
             let new_score = adam.update(
@@ -742,7 +742,7 @@ fn td_update(
             );
             evaluator.tables[pattern_id][stage][index] = score_to_u16(new_score);
         }
-        
+
         // トレース減衰
         traces.update(lambda);
     }
@@ -759,7 +759,7 @@ struct AdamOptimizer {
     beta1: f32,
     beta2: f32,
     epsilon: f32,
-    
+
     // [pattern_id][stage][index]
     m: Vec<Vec<Vec<f32>>>,  // 1次モーメント
     v: Vec<Vec<Vec<f32>>>,  // 2次モーメント
@@ -770,21 +770,21 @@ impl AdamOptimizer {
     fn new(patterns: &[Pattern]) -> Self {
         let mut m = Vec::new();
         let mut v = Vec::new();
-        
+
         for pattern in patterns {
             let entries_per_stage = 3usize.pow(pattern.k as u32);
             let mut pattern_m = Vec::new();
             let mut pattern_v = Vec::new();
-            
+
             for _ in 0..30 {
                 pattern_m.push(vec![0.0f32; entries_per_stage]);
                 pattern_v.push(vec![0.0f32; entries_per_stage]);
             }
-            
+
             m.push(pattern_m);
             v.push(pattern_v);
         }
-        
+
         Self {
             alpha: 0.025,
             beta1: 0.9,
@@ -795,7 +795,7 @@ impl AdamOptimizer {
             t: 0,
         }
     }
-    
+
     fn update(
         &mut self,
         pattern_id: usize,
@@ -805,19 +805,19 @@ impl AdamOptimizer {
         gradient: f32,
     ) -> f32 {
         self.t += 1;
-        
+
         // 1次モーメント更新
         let m = &mut self.m[pattern_id][stage][index];
         *m = self.beta1 * *m + (1.0 - self.beta1) * gradient;
-        
+
         // 2次モーメント更新
         let v = &mut self.v[pattern_id][stage][index];
         *v = self.beta2 * *v + (1.0 - self.beta2) * gradient * gradient;
-        
+
         // バイアス補正
         let m_hat = *m / (1.0 - self.beta1.powi(self.t as i32));
         let v_hat = *v / (1.0 - self.beta2.powi(self.t as i32));
-        
+
         // パラメータ更新
         current_value + self.alpha * m_hat / (v_hat.sqrt() + self.epsilon)
     }
@@ -839,11 +839,11 @@ fn save_checkpoint(
     path: &str,
 ) -> std::io::Result<()> {
     let mut file = File::create(path)?;
-    
+
     // ヘッダー
     file.write_all(b"OTHELLO_AI_CHECKPOINT_V1")?;
     file.write_all(&game_count.to_le_bytes())?;
-    
+
     // パターンテーブル
     for pattern in &evaluator.tables {
         for stage in pattern {
@@ -852,7 +852,7 @@ fn save_checkpoint(
             }
         }
     }
-    
+
     // Adam状態
     for pattern_m in &adam.m {
         for stage_m in pattern_m {
@@ -861,7 +861,7 @@ fn save_checkpoint(
             }
         }
     }
-    
+
     for pattern_v in &adam.v {
         for stage_v in pattern_v {
             for &v_value in stage_v {
@@ -869,9 +869,9 @@ fn save_checkpoint(
             }
         }
     }
-    
+
     file.write_all(&adam.t.to_le_bytes())?;
-    
+
     Ok(())
 }
 ```
@@ -889,7 +889,7 @@ fn solve_exact(
     if board.is_game_over() {
         return board.final_score() * 100;
     }
-    
+
     let moves = board.legal_moves();
     if moves == 0 {
         board.pass();
@@ -897,18 +897,18 @@ fn solve_exact(
         board.undo_pass();
         return score;
     }
-    
+
     let mut best = alpha;
-    
+
     for mv in 0..64 {
         if moves & (1 << mv) == 0 {
             continue;
         }
-        
+
         let undo = board.make_move(mv);
         let score = -solve_exact(board, -beta, -best);
         board.undo_move(undo);
-        
+
         if score > best {
             best = score;
             if best >= beta {
@@ -916,7 +916,7 @@ fn solve_exact(
             }
         }
     }
-    
+
     best
 }
 ```
@@ -941,23 +941,23 @@ impl PyEvaluator {
             evaluator: Evaluator::new(),
         }
     }
-    
+
     fn evaluate(&self, board: Vec<u8>) -> PyResult<f32> {
         // board: 64要素のVec、0=空、1=黒、2=白
         let board = Board::from_array(&board)?;
         Ok(self.evaluator.evaluate(&board))
     }
-    
+
     fn train_game(&mut self, time_ms: u64, epsilon: f32) -> PyResult<Vec<f32>> {
         // 1局対戦して統計を返す
         // ...
     }
-    
+
     fn save(&self, path: &str) -> PyResult<()> {
         // チェックポイント保存
         Ok(())
     }
-    
+
     fn load(&mut self, path: &str) -> PyResult<()> {
         // チェックポイント読み込み
         Ok(())

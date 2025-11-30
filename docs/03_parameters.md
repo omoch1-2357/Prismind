@@ -252,7 +252,7 @@ panic = "abort"        # パニック時即座に終了
 ```
 td_error = target - current_value
 
-target = 
+target =
   - 最終手: final_score
   - それ以外: λ × final_score + (1-λ) × next_value
 

@@ -30,17 +30,20 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Protocol, Tuple
 
 # Try to import prismind module
 # This is done conditionally to allow testing of script utilities without the full library
 _PRISMIND_AVAILABLE = False
-PyEvaluator = None
-PyCheckpointManager = None
+_PyEvaluator: Optional[type] = None
+_PyCheckpointManager: Optional[type] = None
 
 try:
-    from prismind import PyCheckpointManager, PyEvaluator
+    from prismind import PyCheckpointManager as _ImportedCheckpointManager
+    from prismind import PyEvaluator as _ImportedEvaluator
 
+    _PyEvaluator = _ImportedEvaluator
+    _PyCheckpointManager = _ImportedCheckpointManager
     _PRISMIND_AVAILABLE = True
 except ImportError:
     # Module not available - utilities can still be tested
@@ -245,6 +248,22 @@ def create_initial_board() -> List[int]:
     return board
 
 
+class PlayerProtocol(Protocol):
+    """Protocol for player objects."""
+
+    def select_move(self, board: List[int], player: int) -> Optional[int]:
+        """Select a move given the board state and current player."""
+        ...
+
+
+class EvaluatorProtocol(Protocol):
+    """Protocol for evaluator objects."""
+
+    def evaluate(self, board: List[int], player: int) -> float:
+        """Evaluate a board position."""
+        ...
+
+
 class RandomPlayer:
     """
     Random player that selects moves uniformly at random.
@@ -345,7 +364,7 @@ class ModelPlayer:
     with the highest evaluation.
     """
 
-    def __init__(self, evaluator: Any):
+    def __init__(self, evaluator: EvaluatorProtocol):
         """Initialize with a PyEvaluator instance."""
         self.evaluator = evaluator
 
@@ -377,7 +396,9 @@ class ModelPlayer:
         return best_move
 
 
-def play_game(black_player: Any, white_player: Any, max_moves: int = 100) -> GameResult:
+def play_game(
+    black_player: PlayerProtocol, white_player: PlayerProtocol, max_moves: int = 100
+) -> GameResult:
     """
     Play a single game between two players.
 
@@ -425,7 +446,7 @@ def play_game(black_player: Any, white_player: Any, max_moves: int = 100) -> Gam
 
 def evaluate_against_opponent(
     model_player: ModelPlayer,
-    opponent: Any,
+    opponent: PlayerProtocol,
     opponent_name: str,
     num_games: int,
     verbose: bool = False,
@@ -604,7 +625,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Check if prismind is available
-    if not _PRISMIND_AVAILABLE:
+    if not _PRISMIND_AVAILABLE or _PyEvaluator is None or _PyCheckpointManager is None:
         print("Error: prismind module not available.")
         print("Make sure the prismind library is built and installed.")
         print("Run: maturin develop --release")
@@ -614,10 +635,7 @@ def main() -> int:
     checkpoint_path = args.checkpoint
     if checkpoint_path.lower() == "latest":
         try:
-            assert PyCheckpointManager is not None, "prismind module not available"
-            checkpoint_manager = PyCheckpointManager(  # type: ignore[unreachable]
-                checkpoint_dir=args.checkpoint_dir
-            )
+            checkpoint_manager = _PyCheckpointManager(checkpoint_dir=args.checkpoint_dir)
             checkpoints = checkpoint_manager.list_checkpoints()
             if not checkpoints:
                 print(f"Error: No checkpoints found in {args.checkpoint_dir}")
@@ -636,14 +654,13 @@ def main() -> int:
         print(f"\nLoading model from: {checkpoint_path}")
 
     try:
-        assert PyEvaluator is not None, "prismind module not available"
-        evaluator = PyEvaluator(checkpoint_path=checkpoint_path)  # type: ignore[unreachable]
+        evaluator = _PyEvaluator(checkpoint_path=checkpoint_path)
     except Exception as e:
         print(f"Error loading checkpoint: {e}")
         return 1
 
     # Create model player
-    model_player = ModelPlayer(evaluator)  # type: ignore[unreachable]
+    model_player = ModelPlayer(evaluator)
 
     # Set random seed
     seed = args.seed

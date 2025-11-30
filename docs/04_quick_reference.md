@@ -60,16 +60,16 @@ struct AdamOptimizer {
 ```
 function evaluate(board, stage):
     sum = 0
-    
+
     for rotation in [0°, 90°, 180°, 270°]:
         rotated = rotate_board(board, rotation)
         swap = (rotation == 90° or rotation == 270°)
-        
+
         for pattern in PATTERNS[0..13]:
             index = extract_index(rotated, pattern, swap)
             score = u16_to_score(table[pattern.id][stage][index])
             sum += score
-    
+
     if board.turn == White:
         return -sum
     else:
@@ -82,16 +82,16 @@ function mtdf(board, depth, guess):
     g = guess
     lower = -∞
     upper = +∞
-    
+
     while lower < upper:
         beta = (g == lower) ? g + 1 : g
         g = alpha_beta(board, depth, beta - 1, beta)
-        
+
         if g < beta:
             upper = g
         else:
             lower = g
-    
+
     return g
 ```
 
@@ -101,18 +101,18 @@ function iterative_deepening(board, time_limit):
     start_time = now()
     guess = evaluate(board)
     best_move = null
-    
+
     for depth = 1 to 60:
         if elapsed_time() > time_limit:
             break
-        
+
         score, move = mtdf(board, depth, guess)
         guess = score
         best_move = move
-        
+
         if elapsed_time() > time_limit * 0.8:
             break
-    
+
     return best_move
 ```
 
@@ -120,32 +120,32 @@ function iterative_deepening(board, time_limit):
 ```
 function td_update(history, final_score, lambda):
     traces = new EligibilityTrace()
-    
+
     for t from (history.length - 1) down to 0:
         # Eligibility Trace更新
         for each pattern_instance in history[t]:
             traces.increment(pattern_instance)
-        
+
         # TD誤差計算
         current_value = history[t].leaf_value
-        
+
         if t == last:
             target = final_score
         else:
             next_value = history[t+1].leaf_value
             target = lambda * final_score + (1 - lambda) * next_value
-        
+
         td_error = target - current_value
-        
+
         # 各パターンを更新
         for each pattern_instance in history[t]:
             trace = traces.get(pattern_instance)
             gradient = td_error * trace
-            
+
             # Adam更新
             new_value = adam.update(pattern_instance, gradient)
             table[pattern_instance] = score_to_u16(new_value)
-        
+
         # トレース減衰
         traces.decay(lambda)
 ```
@@ -154,18 +154,18 @@ function td_update(history, final_score, lambda):
 ```
 function adam_update(param_id, current_value, gradient):
     t += 1
-    
+
     # モーメント更新
     m[param_id] = β1 * m[param_id] + (1 - β1) * gradient
     v[param_id] = β2 * v[param_id] + (1 - β2) * gradient²
-    
+
     # バイアス補正
     m_hat = m[param_id] / (1 - β1^t)
     v_hat = v[param_id] / (1 - β2^t)
-    
+
     # パラメータ更新
     new_value = current_value + α * m_hat / (√v_hat + ε)
-    
+
     return new_value
 ```
 
@@ -174,7 +174,7 @@ function adam_update(param_id, current_value, gradient):
 function play_self_game(evaluator, epsilon):
     board = new_initial_board()
     history = []
-    
+
     while not board.is_game_over():
         if random() < epsilon:
             # ε-greedy: ランダム手
@@ -184,16 +184,16 @@ function play_self_game(evaluator, epsilon):
             # 探索
             move = iterative_deepening(board, time_limit=15ms)
             leaf_value = evaluate(board)  # 探索後の評価
-        
+
         history.append({
             board: board.clone(),
             leaf_value: leaf_value,
             patterns: extract_all_patterns(board),
             stage: board.move_count() / 2
         })
-        
+
         board.make_move(move)
-    
+
     return history, board.final_score()
 ```
 
@@ -220,7 +220,7 @@ fn score_to_u16(s: f32) -> u16 {
 // 0=空, 1=黒, 2=白（swap時は逆）
 fn extract_index(black: u64, white: u64, pattern: &Pattern, swap: bool) -> usize {
     let mut index = 0;
-    
+
     for (i, &pos) in pattern.positions.iter().enumerate() {
         let state = if black & (1 << pos) != 0 {
             if swap { 2 } else { 1 }
@@ -229,10 +229,10 @@ fn extract_index(black: u64, white: u64, pattern: &Pattern, swap: bool) -> usize
         } else {
             0
         };
-        
+
         index += state * 3.pow(i);
     }
-    
+
     index
 }
 ```
@@ -275,17 +275,17 @@ initialize adam (m=0, v=0, t=0)
 for game_num from 0 to 1_000_000:
     # ε-greedy設定
     epsilon = get_epsilon(game_num)
-    
+
     # 自己対戦
     history, final_score = play_self_game(evaluator, epsilon)
-    
+
     # TD更新
     td_update(history, final_score, lambda=0.3, evaluator, adam)
-    
+
     # 統計記録
     if game_num % 100 == 0:
         log_statistics(history, final_score)
-    
+
     # チェックポイント
     if game_num % 100_000 == 0:
         save_checkpoint(evaluator, adam, game_num)
@@ -314,7 +314,7 @@ opponent = white (黒番時)
 for each direction:
     # 方向に沿って相手の石があるか探索
     candidates = shift(opponent, dir) & black
-    
+
     while candidates != 0:
         candidates = shift(candidates, dir)
         legal_moves |= candidates & empty
@@ -346,7 +346,7 @@ if entry.hash == hash and entry.depth >= depth:
         alpha = max(alpha, entry.score)
     elif entry.bound == Upper:
         beta = min(beta, entry.score)
-    
+
     if alpha >= beta:
         return entry.score
 ```
@@ -356,7 +356,7 @@ if entry.hash == hash and entry.depth >= depth:
 index = hash % table_size
 
 # 置換戦略: 深さと世代で判断
-if table[index] is empty or 
+if table[index] is empty or
    table[index].depth < new_depth or
    table[index].age != current_age:
     table[index] = new_entry
@@ -369,10 +369,10 @@ if table[index] is empty or
 ```
 function order_moves(moves, tt_entry):
     move_list = []
-    
+
     for pos in legal_positions(moves):
         priority = 0
-        
+
         if pos == tt_entry.best_move:
             priority = -10000
         elif is_corner(pos):
@@ -381,9 +381,9 @@ function order_moves(moves, tt_entry):
             priority = +500
         elif is_edge(pos):
             priority = -100
-        
+
         move_list.append((pos, priority))
-    
+
     sort move_list by priority (ascending)
     return move_list
 ```
@@ -396,24 +396,24 @@ function order_moves(moves, tt_entry):
 function solve_exact(board, alpha, beta):
     if game_over:
         return final_score * 100
-    
+
     moves = legal_moves(board)
-    
+
     if no_moves:
         # パス
         return -solve_exact(pass(board), -beta, -alpha)
-    
+
     best = alpha
-    
+
     for move in moves:
         board.make_move(move)
         score = -solve_exact(board, -beta, -best)
         board.undo_move()
-        
+
         best = max(best, score)
         if best >= beta:
             break  # βカット
-    
+
     return best
 ```
 

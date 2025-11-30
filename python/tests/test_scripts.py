@@ -12,6 +12,7 @@ Requirements Coverage:
 """
 
 import argparse
+import logging
 import os
 import sys
 import tempfile
@@ -34,84 +35,86 @@ except ImportError:
 class TestTrainScript(unittest.TestCase):
     """Tests for train.py script."""
 
-    def test_argument_parser_creation(self):
+    def test_argument_parser_creation(self) -> None:
         """Test that argument parser is created with all required arguments."""
         parser = train.create_argument_parser()
         self.assertIsInstance(parser, argparse.ArgumentParser)
 
-    def test_argument_parser_target_games(self):
+    def test_argument_parser_target_games(self) -> None:
         """Test --target-games argument (Req 10.1)."""
         parser = train.create_argument_parser()
         args = parser.parse_args(["--target-games", "100000"])
         self.assertEqual(args.target_games, 100000)
 
-    def test_argument_parser_checkpoint_interval(self):
+    def test_argument_parser_checkpoint_interval(self) -> None:
         """Test --checkpoint-interval argument (Req 10.1)."""
         parser = train.create_argument_parser()
         args = parser.parse_args(["--checkpoint-interval", "5000"])
         self.assertEqual(args.checkpoint_interval, 5000)
 
-    def test_argument_parser_search_time(self):
+    def test_argument_parser_search_time(self) -> None:
         """Test --search-time argument (Req 10.1)."""
         parser = train.create_argument_parser()
         args = parser.parse_args(["--search-time", "20"])
         self.assertEqual(args.search_time, 20)
 
-    def test_argument_parser_epsilon(self):
+    def test_argument_parser_epsilon(self) -> None:
         """Test --epsilon argument (Req 10.1)."""
         parser = train.create_argument_parser()
         args = parser.parse_args(["--epsilon", "0.15"])
         self.assertEqual(args.epsilon, "0.15")
 
-    def test_argument_parser_resume_flag(self):
+    def test_argument_parser_resume_flag(self) -> None:
         """Test --resume flag (Req 10.2)."""
         parser = train.create_argument_parser()
         args = parser.parse_args(["--resume"])
         self.assertTrue(args.resume)
 
-    def test_argument_parser_default_resume_false(self):
+    def test_argument_parser_default_resume_false(self) -> None:
         """Test --resume flag defaults to False (Req 10.2)."""
         parser = train.create_argument_parser()
         args = parser.parse_args([])
         self.assertFalse(args.resume)
 
-    def test_argument_parser_log_dir(self):
+    def test_argument_parser_log_dir(self) -> None:
         """Test --log-dir argument (Req 10.3)."""
         parser = train.create_argument_parser()
         args = parser.parse_args(["--log-dir", "custom_logs"])
         self.assertEqual(args.log_dir, "custom_logs")
 
-    def test_epsilon_schedule_constant(self):
+    def test_epsilon_schedule_constant(self) -> None:
         """Test constant epsilon schedule parsing."""
         schedule = train.parse_epsilon_schedule("0.1")
         self.assertEqual(len(schedule), 1)
         self.assertEqual(schedule[0][1], 0.1)
 
-    def test_epsilon_schedule_decay(self):
+    def test_epsilon_schedule_decay(self) -> None:
         """Test decay epsilon schedule parsing."""
         schedule = train.parse_epsilon_schedule("0.3:0.05:500000")
         self.assertEqual(len(schedule), 1)
         # Decay format: (games, start, end)
         self.assertEqual(schedule[0][0], 500000)
         self.assertEqual(schedule[0][1], 0.3)
-        self.assertEqual(schedule[0][2], 0.05)
+        # Index 2 for decay schedule
+        decay_schedule = schedule[0]
+        self.assertEqual(len(decay_schedule), 3)
 
-    def test_format_duration_seconds(self):
+    def test_format_duration_seconds(self) -> None:
         """Test duration formatting for seconds."""
         result = train.format_duration(45)
         self.assertIn("s", result)
 
-    def test_format_duration_minutes(self):
+    def test_format_duration_minutes(self) -> None:
         """Test duration formatting for minutes."""
         result = train.format_duration(125)
         self.assertIn("m", result)
 
-    def test_format_duration_hours(self):
+    def test_format_duration_hours(self) -> None:
         """Test duration formatting for hours."""
         result = train.format_duration(3700)
         self.assertIn("h", result)
 
-    def test_format_duration_days(self):
+    def test_format_duration_days(self) -> None:
         """Test duration formatting for days."""
         result = train.format_duration(90000)
         self.assertIn("d", result)
@@ -120,73 +123,73 @@ class TestTrainScript(unittest.TestCase):
 class TestMonitorScript(unittest.TestCase):
     """Tests for monitor.py script."""
 
-    def test_argument_parser_creation(self):
+    def test_argument_parser_creation(self) -> None:
         """Test that argument parser is created."""
         parser = monitor.create_argument_parser()
         self.assertIsInstance(parser, argparse.ArgumentParser)
 
-    def test_argument_parser_refresh(self):
+    def test_argument_parser_refresh(self) -> None:
         """Test --refresh argument."""
         parser = monitor.create_argument_parser()
         args = parser.parse_args(["--refresh", "10"])
         self.assertEqual(args.refresh, 10)
 
-    def test_argument_parser_plot_flag(self):
+    def test_argument_parser_plot_flag(self) -> None:
         """Test --plot flag (Req 10.5)."""
         parser = monitor.create_argument_parser()
         args = parser.parse_args(["--plot"])
         self.assertTrue(args.plot)
 
-    def test_argument_parser_once_flag(self):
+    def test_argument_parser_once_flag(self) -> None:
         """Test --once flag for single display."""
         parser = monitor.create_argument_parser()
         args = parser.parse_args(["--once"])
         self.assertTrue(args.once)
 
-    def test_format_number(self):
+    def test_format_number(self) -> None:
         """Test number formatting with commas."""
         result = monitor.format_number(1234567)
         self.assertEqual(result, "1,234,567")
 
-    def test_format_number_decimals(self):
+    def test_format_number_decimals(self) -> None:
         """Test number formatting with decimals."""
         result = monitor.format_number(1234.567, decimals=2)
         self.assertEqual(result, "1,234.57")
 
-    def test_format_duration(self):
+    def test_format_duration(self) -> None:
         """Test duration formatting."""
         result = monitor.format_duration(3661)
         self.assertIn("h", result)
         self.assertIn("m", result)
 
-    def test_format_percentage(self):
+    def test_format_percentage(self) -> None:
         """Test percentage formatting."""
         result = monitor.format_percentage(0.752)
         self.assertEqual(result, "75.2%")
 
-    def test_format_mb(self):
+    def test_format_mb(self) -> None:
         """Test megabyte formatting."""
         result = monitor.format_mb(256.5)
         self.assertEqual(result, "256.5 MB")
 
-    def test_progress_bar_empty(self):
+    def test_progress_bar_empty(self) -> None:
         """Test progress bar at 0%."""
         result = monitor.progress_bar(0.0, width=10)
         self.assertIn("[", result)
         self.assertIn("]", result)
         self.assertIn("0.0%", result)
 
-    def test_progress_bar_full(self):
+    def test_progress_bar_full(self) -> None:
         """Test progress bar at 100%."""
         result = monitor.progress_bar(1.0, width=10)
         self.assertIn("100.0%", result)
 
-    def test_progress_bar_half(self):
+    def test_progress_bar_half(self) -> None:
         """Test progress bar at 50%."""
         result = monitor.progress_bar(0.5, width=10)
         self.assertIn("50.0%", result)
 
-    def test_progress_bar_clamped(self):
+    def test_progress_bar_clamped(self) -> None:
         """Test progress bar value clamping."""
         result = monitor.progress_bar(1.5, width=10)
         self.assertIn("100.0%", result)
@@ -194,17 +197,17 @@ class TestMonitorScript(unittest.TestCase):
         result = monitor.progress_bar(-0.5, width=10)
         self.assertIn("0.0%", result)
 
-    def test_ascii_chart_empty_data(self):
+    def test_ascii_chart_empty_data(self) -> None:
         """Test ASCII chart with no data."""
         result = monitor.ascii_chart([])
         self.assertIn("No data", result)
 
-    def test_ascii_chart_single_point(self):
+    def test_ascii_chart_single_point(self) -> None:
         """Test ASCII chart with single data point."""
         result = monitor.ascii_chart([(0, 1.0)])
         self.assertIsInstance(result, str)
 
-    def test_ascii_chart_multiple_points(self):
+    def test_ascii_chart_multiple_points(self) -> None:
         """Test ASCII chart with multiple data points."""
         data = [(i, i * 0.1) for i in range(10)]
         result = monitor.ascii_chart(data, width=40, height=10)
@@ -216,42 +219,42 @@ class TestMonitorScript(unittest.TestCase):
 class TestEvaluateScript(unittest.TestCase):
     """Tests for evaluate.py script."""
 
-    def test_argument_parser_creation(self):
+    def test_argument_parser_creation(self) -> None:
         """Test that argument parser is created."""
         parser = evaluate.create_argument_parser()
         self.assertIsInstance(parser, argparse.ArgumentParser)
 
-    def test_argument_parser_checkpoint_required(self):
+    def test_argument_parser_checkpoint_required(self) -> None:
         """Test --checkpoint is required (Req 10.6, 10.7)."""
         parser = evaluate.create_argument_parser()
         with self.assertRaises(SystemExit):
             parser.parse_args([])
 
-    def test_argument_parser_checkpoint(self):
+    def test_argument_parser_checkpoint(self) -> None:
         """Test --checkpoint argument (Req 10.6, 10.7)."""
         parser = evaluate.create_argument_parser()
         args = parser.parse_args(["--checkpoint", "test.bin"])
         self.assertEqual(args.checkpoint, "test.bin")
 
-    def test_argument_parser_games(self):
+    def test_argument_parser_games(self) -> None:
         """Test --games argument."""
         parser = evaluate.create_argument_parser()
         args = parser.parse_args(["--checkpoint", "test.bin", "--games", "1000"])
         self.assertEqual(args.games, 1000)
 
-    def test_argument_parser_random_only(self):
+    def test_argument_parser_random_only(self) -> None:
         """Test --random-only flag (Req 10.6)."""
         parser = evaluate.create_argument_parser()
         args = parser.parse_args(["--checkpoint", "test.bin", "--random-only"])
         self.assertTrue(args.random_only)
 
-    def test_argument_parser_heuristic_only(self):
+    def test_argument_parser_heuristic_only(self) -> None:
         """Test --heuristic-only flag (Req 10.7)."""
         parser = evaluate.create_argument_parser()
         args = parser.parse_args(["--checkpoint", "test.bin", "--heuristic-only"])
         self.assertTrue(args.heuristic_only)
 
-    def test_initial_board(self):
+    def test_initial_board(self) -> None:
         """Test initial board creation."""
         board = evaluate.create_initial_board()
         self.assertEqual(len(board), 64)
@@ -264,7 +267,7 @@ class TestEvaluateScript(unittest.TestCase):
         empty = sum(1 for cell in board if cell == evaluate.EMPTY)
         self.assertEqual(empty, 60)
 
-    def test_pos_to_coords(self):
+    def test_pos_to_coords(self) -> None:
         """Test position to coordinates conversion."""
         # A1 = position 0
         self.assertEqual(evaluate.pos_to_coords(0), (0, 0))
@@ -275,19 +278,19 @@ class TestEvaluateScript(unittest.TestCase):
         # H8 = position 63
         self.assertEqual(evaluate.pos_to_coords(63), (7, 7))
 
-    def test_coords_to_pos(self):
+    def test_coords_to_pos(self) -> None:
         """Test coordinates to position conversion."""
         self.assertEqual(evaluate.coords_to_pos(0, 0), 0)
         self.assertEqual(evaluate.coords_to_pos(0, 7), 7)
         self.assertEqual(evaluate.coords_to_pos(7, 0), 56)
         self.assertEqual(evaluate.coords_to_pos(7, 7), 63)
 
-    def test_get_opponent(self):
+    def test_get_opponent(self) -> None:
         """Test getting opponent color."""
         self.assertEqual(evaluate.get_opponent(evaluate.BLACK), evaluate.WHITE)
         self.assertEqual(evaluate.get_opponent(evaluate.WHITE), evaluate.BLACK)
 
-    def test_get_legal_moves_initial(self):
+    def test_get_legal_moves_initial(self) -> None:
         """Test legal moves from initial position."""
         board = evaluate.create_initial_board()
         # Black moves first
@@ -298,7 +301,7 @@ class TestEvaluateScript(unittest.TestCase):
         expected = {19, 26, 37, 44}
         self.assertEqual(set(moves), expected)
 
-    def test_get_legal_moves_no_moves(self):
+    def test_get_legal_moves_no_moves(self) -> None:
         """Test when no legal moves are available."""
         # Create a board where player has no moves
         board = [evaluate.EMPTY] * 64
@@ -307,7 +310,7 @@ class TestEvaluateScript(unittest.TestCase):
         moves = evaluate.get_legal_moves(board, evaluate.BLACK)
         self.assertEqual(len(moves), 0)
 
-    def test_make_move(self):
+    def test_make_move(self) -> None:
         """Test making a move on the board."""
         board = evaluate.create_initial_board()
         # Black plays D3 (position 19)
@@ -320,14 +323,14 @@ class TestEvaluateScript(unittest.TestCase):
         # D3 flips D4
         self.assertEqual(new_board[27], evaluate.BLACK)
 
-    def test_count_pieces(self):
+    def test_count_pieces(self) -> None:
         """Test counting pieces on the board."""
         board = evaluate.create_initial_board()
         black, white = evaluate.count_pieces(board)
         self.assertEqual(black, 2)
         self.assertEqual(white, 2)
 
-    def test_random_player_select_move(self):
+    def test_random_player_select_move(self) -> None:
         """Test random player move selection (Req 10.6)."""
         player = evaluate.RandomPlayer(seed=42)
         board = evaluate.create_initial_board()
@@ -336,7 +339,7 @@ class TestEvaluateScript(unittest.TestCase):
         legal_moves = evaluate.get_legal_moves(board, evaluate.BLACK)
         self.assertIn(move, legal_moves)
 
-    def test_random_player_no_moves(self):
+    def test_random_player_no_moves(self) -> None:
         """Test random player with no legal moves."""
         player = evaluate.RandomPlayer(seed=42)
         # Create board with no moves
@@ -345,7 +348,7 @@ class TestEvaluateScript(unittest.TestCase):
         move = player.select_move(board, evaluate.BLACK)
         self.assertIsNone(move)
 
-    def test_heuristic_player_select_move(self):
+    def test_heuristic_player_select_move(self) -> None:
         """Test heuristic player move selection (Req 10.7)."""
         player = evaluate.HeuristicPlayer(seed=42)
         board = evaluate.create_initial_board()
@@ -354,7 +357,7 @@ class TestEvaluateScript(unittest.TestCase):
         legal_moves = evaluate.get_legal_moves(board, evaluate.BLACK)
         self.assertIn(move, legal_moves)
 
-    def test_heuristic_player_prefers_corners(self):
+    def test_heuristic_player_prefers_corners(self) -> None:
         """Test heuristic player corner preference (Req 10.7)."""
         player = evaluate.HeuristicPlayer(seed=42)
         # Create a board where a corner is available
@@ -371,7 +374,7 @@ class TestEvaluateScript(unittest.TestCase):
             move = player.select_move(board, evaluate.BLACK)
             self.assertEqual(move, 0)
 
-    def test_play_game_completes(self):
+    def test_play_game_completes(self) -> None:
         """Test that play_game completes and returns result."""
         black_player = evaluate.RandomPlayer(seed=42)
         white_player = evaluate.RandomPlayer(seed=43)
@@ -382,7 +385,7 @@ class TestEvaluateScript(unittest.TestCase):
         # Exactly one of these should be true
         self.assertEqual(result.black_won + result.white_won + result.draw, 1)
 
-    def test_evaluation_result_dataclass(self):
+    def test_evaluation_result_dataclass(self) -> None:
         """Test EvaluationResult dataclass."""
         result = evaluate.EvaluationResult(
             opponent_name="Test",
@@ -402,7 +405,7 @@ class TestEvaluateScript(unittest.TestCase):
 class TestSignalHandling(unittest.TestCase):
     """Tests for signal handling in train.py (Req 10.8)."""
 
-    def test_signal_handler_sets_flag(self):
+    def test_signal_handler_sets_flag(self) -> None:
         """Test that signal handler sets shutdown flag."""
         train._shutdown_requested = False
         train._training_manager = None
@@ -412,7 +415,7 @@ class TestSignalHandling(unittest.TestCase):
         # Reset for other tests
         train._shutdown_requested = False
 
-    def test_signal_handler_double_interrupt(self):
+    def test_signal_handler_double_interrupt(self) -> None:
         """Test that double interrupt triggers force exit."""
         train._shutdown_requested = True
         train._training_manager = None
@@ -425,15 +428,15 @@ class TestSignalHandling(unittest.TestCase):
 class TestLogging(unittest.TestCase):
     """Tests for logging functionality in train.py (Req 10.3)."""
 
-    def _cleanup_logger(self, logger):
+    def _cleanup_logger(self, logger: logging.Logger) -> None:
         """Close all handlers on the logger to release file handles."""
         for handler in logger.handlers[:]:
             handler.close()
             logger.removeHandler(handler)
 
-    def test_setup_logging_creates_logger(self):
+    def test_setup_logging_creates_logger(self) -> None:
         """Test that setup_logging creates a logger."""
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
             logger = train.setup_logging(tmpdir, "info")
             try:
                 self.assertIsNotNone(logger)
@@ -441,9 +444,9 @@ class TestLogging(unittest.TestCase):
             finally:
                 self._cleanup_logger(logger)
 
-    def test_setup_logging_creates_log_directory(self):
+    def test_setup_logging_creates_log_directory(self) -> None:
         """Test that setup_logging creates the log directory."""
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
             log_dir = os.path.join(tmpdir, "new_logs")
             logger = train.setup_logging(log_dir, "info")
             try:
@@ -451,9 +454,9 @@ class TestLogging(unittest.TestCase):
             finally:
                 self._cleanup_logger(logger)
 
-    def test_setup_logging_creates_log_file(self):
+    def test_setup_logging_creates_log_file(self) -> None:
         """Test that setup_logging creates a log file."""
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        with tempfile.TemporaryDirectory() as tmpdir:
             logger = train.setup_logging(tmpdir, "info")
             try:
                 log_files = list(Path(tmpdir).glob("training_*.log"))

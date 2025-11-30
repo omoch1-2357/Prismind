@@ -33,18 +33,18 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from types import FrameType
+from typing import Callable, List, Optional, Protocol, Tuple, Union
 
 # Try to import prismind module
 # This is done conditionally to allow testing of script utilities without the full library
 _PRISMIND_AVAILABLE = False
-PyTrainingManager = None
-PyCheckpointManager = None
-PyStatisticsManager = None
+_PyTrainingManager: Optional[type] = None
 
 try:
-    from prismind import PyTrainingManager
+    from prismind import PyTrainingManager as _ImportedTrainingManager
 
+    _PyTrainingManager = _ImportedTrainingManager
     _PRISMIND_AVAILABLE = True
 except ImportError:
     # Module not available - utilities can still be tested
@@ -52,9 +52,52 @@ except ImportError:
     pass
 
 
+class TrainingManagerProtocol(Protocol):
+    """Protocol for training manager objects."""
+
+    def set_progress_callback(self, callback: "Callable[[int, float, float, float], None]") -> None:
+        """Set progress callback."""
+        ...
+
+    def resume_training(self) -> None:
+        """Resume from checkpoint."""
+        ...
+
+    def game_count(self) -> int:
+        """Get current game count."""
+        ...
+
+    def pause_training(self) -> None:
+        """Pause training."""
+        ...
+
+    def start_training(
+        self,
+        target_games: int,
+        checkpoint_interval: int,
+        callback_interval: int,
+        search_time_ms: int,
+        epsilon: float,
+    ) -> "TrainingResult":
+        """Start training."""
+        ...
+
+
+class TrainingResult(Protocol):
+    """Protocol for training result."""
+
+    games_completed: int
+    final_stone_diff: float
+    black_win_rate: float
+    white_win_rate: float
+    draw_rate: float
+    games_per_second: float
+    error_count: int
+
+
 # Global flag for graceful shutdown
 _shutdown_requested = False
-_training_manager: Optional[Any] = None
+_training_manager: Optional[TrainingManagerProtocol] = None
 
 
 def setup_logging(log_dir: str, log_level: str = "info") -> logging.Logger:
@@ -113,7 +156,7 @@ def setup_logging(log_dir: str, log_level: str = "info") -> logging.Logger:
     return logger
 
 
-def signal_handler(signum: int, _frame: Any) -> None:
+def signal_handler(signum: int, _frame: Optional[FrameType]) -> None:
     """
     Handle interrupt signals (Ctrl+C) for graceful shutdown.
 
@@ -382,7 +425,7 @@ def main() -> int:
 
     try:
         # Check if prismind is available
-        if not _PRISMIND_AVAILABLE:
+        if not _PRISMIND_AVAILABLE or _PyTrainingManager is None:
             logger.error("prismind module not available.")
             logger.error("Make sure the prismind library is built and installed.")
             logger.error("Run: maturin develop --release")
@@ -393,20 +436,20 @@ def main() -> int:
 
         # Create training manager
         logger.info("Initializing training manager...")
-        assert PyTrainingManager is not None, "prismind module not available"
-        _training_manager = PyTrainingManager(  # type: ignore[unreachable]
+        training_mgr = _PyTrainingManager(
             checkpoint_dir=args.checkpoint_dir, log_dir=args.log_dir, pattern_file=args.pattern_file
         )
+        _training_manager = training_mgr
 
         # Set progress callback
-        _training_manager.set_progress_callback(progress_callback)
+        training_mgr.set_progress_callback(progress_callback)
 
         # Handle resume
         if args.resume:
             logger.info("Attempting to resume from latest checkpoint...")
             try:
-                _training_manager.resume_training()
-                current_games = _training_manager.game_count()
+                training_mgr.resume_training()
+                current_games = training_mgr.game_count()
                 logger.info(f"Resumed from checkpoint at {current_games:,} games")
             except RuntimeError as e:
                 logger.warning(f"No checkpoint to resume from: {e}")
@@ -432,7 +475,7 @@ def main() -> int:
         logger.info("Starting training...")
         start_time = time.time()
 
-        result = _training_manager.start_training(
+        result = training_mgr.start_training(
             target_games=args.target_games,
             checkpoint_interval=args.checkpoint_interval,
             callback_interval=args.callback_interval,

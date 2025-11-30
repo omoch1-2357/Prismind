@@ -177,7 +177,7 @@ jobs:
         run: |
           sudo apt-get update
           export DEBIAN_FRONTEND=noninteractive
-          
+
           echo "Kernel: $(uname -r)"
 
           if sudo apt-get install -y "linux-tools-$(uname -r)" "linux-cloud-tools-$(uname -r)" linux-tools-common; then
@@ -232,10 +232,10 @@ jobs:
 
             CACHE_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | head -1 | grep -oP '\d+\.\d+' || echo "N/A")
             echo "cache_miss_rate=$CACHE_MISS_RATE" >> "$GITHUB_OUTPUT"
-            
+
             BRANCH_MISS_RATE=$(grep "Miss Rate:" "$REPORT_FILE" | tail -1 | grep -oP '\d+\.\d+' || echo "N/A")
             echo "branch_miss_rate=$BRANCH_MISS_RATE" >> "$GITHUB_OUTPUT"
-            
+
             IPC=$(grep "IPC:" "$REPORT_FILE" | grep -oP '\d+\.\d+' || echo "N/A")
             echo "ipc=$IPC" >> "$GITHUB_OUTPUT"
 

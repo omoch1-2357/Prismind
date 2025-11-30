@@ -31,17 +31,20 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, cast
 
 # Try to import prismind module
 # This is done conditionally to allow testing of script utilities without the full library
 _PRISMIND_AVAILABLE = False
-PyStatisticsManager = None
-PyCheckpointManager = None
+_PyStatisticsManager: Optional[type] = None
+_PyCheckpointManager: Optional[type] = None
 
 try:
-    from prismind import PyCheckpointManager, PyStatisticsManager
+    from prismind import PyCheckpointManager as _ImportedCheckpointManager
+    from prismind import PyStatisticsManager as _ImportedStatisticsManager
 
+    _PyStatisticsManager = _ImportedStatisticsManager
+    _PyCheckpointManager = _ImportedCheckpointManager
     _PRISMIND_AVAILABLE = True
 except ImportError:
     # Module not available - utilities can still be tested
@@ -279,9 +282,37 @@ def print_status(status: str, ok: bool = True) -> None:
     print(f"  {color}{symbol}{Colors.RESET} {status}")
 
 
+class StatisticsManagerProtocol(Protocol):
+    """Protocol for statistics manager objects."""
+
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get current statistics."""
+        ...
+
+    def get_convergence_metrics(self) -> Dict[str, Any]:
+        """Get convergence metrics."""
+        ...
+
+    def get_pattern_coverage(self) -> Dict[str, Any]:
+        """Get pattern coverage info."""
+        ...
+
+    def get_memory_report(self) -> Dict[str, Any]:
+        """Get memory usage report."""
+        ...
+
+
+class CheckpointManagerProtocol(Protocol):
+    """Protocol for checkpoint manager objects."""
+
+    def list_checkpoints(self) -> List[Tuple[str, int, str, int]]:
+        """List available checkpoints."""
+        ...
+
+
 def display_dashboard(
-    stats_manager: Any,
-    checkpoint_manager: Optional[Any] = None,
+    stats_manager: StatisticsManagerProtocol,
+    checkpoint_manager: Optional[CheckpointManagerProtocol] = None,
     show_charts: bool = False,
     history: Optional[List[Tuple[int, float, float]]] = None,
 ) -> None:
@@ -339,10 +370,10 @@ def display_dashboard(
         print_kv("Coverage %", format_percentage(coverage.get("entry_coverage_pct", 0) / 100))
         print_kv("Avg Updates/Entry", f"{coverage.get('avg_updates_per_entry', 0):.2f}")
 
-        warnings = coverage.get("warnings", [])
-        if warnings:
+        warnings_list: List[str] = cast(List[str], coverage.get("warnings", []))
+        if warnings_list:
             print(f"\n  {Colors.YELLOW}Warnings:{Colors.RESET}")
-            for warning in warnings:
+            for warning in warnings_list:
                 print(f"    {Colors.YELLOW}! {warning}{Colors.RESET}")
     except Exception as e:
         print(f"  {Colors.RED}Error getting pattern coverage: {e}{Colors.RESET}")
@@ -351,9 +382,9 @@ def display_dashboard(
     print_section("Memory Usage")
     try:
         memory = stats_manager.get_memory_report()
-        total_mb = memory.get("total_mb", 0)
-        budget_mb = memory.get("budget_mb", 600)
-        within_budget = memory.get("within_budget", True)
+        total_mb: float = cast(float, memory.get("total_mb", 0))
+        budget_mb: float = cast(float, memory.get("budget_mb", 600))
+        within_budget: bool = cast(bool, memory.get("within_budget", True))
 
         print_kv("Pattern Tables", format_mb(memory.get("pattern_tables_mb", 0)))
         print_kv("Adam Optimizer", format_mb(memory.get("adam_state_mb", 0)))
@@ -473,21 +504,20 @@ def main() -> int:
 
     try:
         # Check if prismind is available
-        if not _PRISMIND_AVAILABLE:
+        if not _PRISMIND_AVAILABLE or _PyStatisticsManager is None:
             print("Error: prismind module not available.")
             print("Make sure the prismind library is built and installed.")
             print("Run: maturin develop --release")
             return 1
 
         # Create statistics manager
-        assert PyStatisticsManager is not None, "prismind module not available"
-        stats_manager = PyStatisticsManager()  # type: ignore[unreachable]
+        stats_manager = _PyStatisticsManager()
 
         # Create checkpoint manager if directory exists
-        checkpoint_manager = None
-        if PyCheckpointManager is not None and Path(args.checkpoint_dir).exists():
+        checkpoint_manager: Optional[CheckpointManagerProtocol] = None
+        if _PyCheckpointManager is not None and Path(args.checkpoint_dir).exists():
             with contextlib.suppress(Exception):
-                checkpoint_manager = PyCheckpointManager(checkpoint_dir=args.checkpoint_dir)
+                checkpoint_manager = _PyCheckpointManager(checkpoint_dir=args.checkpoint_dir)
 
         # Training history for charts
         history: List[Tuple[int, float, float]] = []
@@ -516,7 +546,7 @@ def main() -> int:
                     win_rate = 0.5 + (stone_diff / 64) * 0.5  # Rough approximation
 
                     if games > 0:
-                        history.append((games, stone_diff, win_rate))
+                        history.append((int(games), stone_diff, win_rate))
 
                     # Keep history bounded
                     if len(history) > 100:
