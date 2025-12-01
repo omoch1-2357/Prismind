@@ -1,8 +1,8 @@
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use prismind::board::BitBoard;
 use prismind::evaluator::Evaluator;
 use prismind::search::Search;
-use std::path::PathBuf;
+use std::{hint::black_box, path::PathBuf};
 
 /// ベンチマーク用の評価関数を初期化
 fn setup_evaluator() -> Evaluator {

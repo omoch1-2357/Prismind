@@ -1,6 +1,7 @@
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use prismind::board::BitBoard;
 use prismind::{legal_moves, make_move, undo_move};
+use std::hint::black_box;
 
 /// Benchmark make_move() on initial position
 fn bench_make_move_initial(c: &mut Criterion) {
