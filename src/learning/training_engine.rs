@@ -1174,9 +1174,8 @@ impl TrainingEngine {
         self.set_state(TrainingState::Training);
         self.clear_pause_flag();
 
-        // Reset progress tracking
-        self.accumulated_stone_diffs.clear();
-        self.accumulated_wins = (0, 0, 0);
+        // Note: Do NOT reset accumulated_stone_diffs and accumulated_wins here
+        // to preserve statistics across resume sessions
 
         self.logger.log_info(&format!(
             "Starting training: {} -> {} games ({} threads)",
@@ -1197,9 +1196,6 @@ impl TrainingEngine {
         let mut detailed_search_times = Vec::new();
         let tt_hits_total = 0u64;
         let tt_probes_total = 0u64;
-
-        // Games since last callback
-        let mut games_since_callback = 0u64;
 
         // Main training loop
         while self.game_count < target_games {
@@ -1256,7 +1252,6 @@ impl TrainingEngine {
 
                                 self.convergence.record_game(stone_diff, &[], &[]);
                                 self.game_count += 1;
-                                games_since_callback += 1;
                             }
                             crate::learning::error_handler::PanicCatchResult::Err(e) => {
                                 self.logger.log_warning(&format!("TD update failed: {}", e));
@@ -1300,13 +1295,12 @@ impl TrainingEngine {
                 }
             }
 
-            // Progress callback (Req 2.4)
-            if games_since_callback >= self.callback_interval {
-                if let Some(ref mut cb) = callback {
-                    let progress = self.get_progress();
-                    cb(progress);
-                }
-                games_since_callback = 0;
+            // Progress callback (Req 2.4) - trigger when game_count is a multiple of callback_interval
+            if self.game_count.is_multiple_of(self.callback_interval)
+                && let Some(ref mut cb) = callback
+            {
+                let progress = self.get_progress();
+                cb(progress);
             }
 
             // Batch logging (every 100 games)
