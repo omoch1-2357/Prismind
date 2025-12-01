@@ -160,6 +160,51 @@ pub fn u16_to_score_simd(values: &[u16; 8]) -> [f32; 8] {
     crate::arm64::u16_to_score_simd_arm64(values)
 }
 
+/// SSE/AVX SIMDを使用してu16型の評価値8個をf32型の石差に一括変換
+///
+/// # 変換式
+///
+/// 各要素について `(value - 32768.0) / 256.0` を並列実行
+///
+/// # Arguments
+///
+/// * `values` - u16型の評価値8個の配列
+///
+/// # Returns
+///
+/// f32型の石差8個の配列
+///
+/// # Platform Support
+///
+/// この関数はx86-64アーキテクチャでのみ利用可能。
+/// ランタイムでCPU機能を検出し、AVX2またはSSE4.1を使用する。
+///
+/// # Note
+///
+/// この関数は[`crate::x86_64::u16_to_score_simd_x86_64`]へのラッパーです。
+/// x86-64専用の最適化コードは[`crate::x86_64`]モジュールに集約されています。
+///
+/// # Examples
+///
+/// ```ignore
+/// #[cfg(target_arch = "x86_64")]
+/// use prismind::evaluator::u16_to_score_simd;
+///
+/// #[cfg(target_arch = "x86_64")]
+/// {
+///     let values: [u16; 8] = [0, 10000, 20000, 32768, 40000, 50000, 60000, 65535];
+///     let scores = u16_to_score_simd(&values);
+///     assert_eq!(scores[0], -128.0);
+///     assert_eq!(scores[3], 0.0);
+/// }
+/// ```
+#[cfg(target_arch = "x86_64")]
+#[inline]
+pub fn u16_to_score_simd(values: &[u16; 8]) -> [f32; 8] {
+    // x86-64専用最適化モジュールに委譲
+    crate::x86_64::u16_to_score_simd_x86_64(values)
+}
+
 /// 評価テーブル（Structure of Arrays形式）
 ///
 /// # メモリレイアウト
@@ -661,6 +706,23 @@ impl Evaluator {
                             let ptr = self.table.data[stage].as_ptr().add(next_offset);
                             // ARM64専用プリフェッチヒント
                             crate::arm64::prefetch_arm64(ptr);
+                        }
+                    }
+                }
+
+                // 次のパターンをプリフェッチ（x86-64最適化）
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if idx < 55 {
+                        let _next_rotation = (idx + 1) / 14;
+                        let next_pattern_id = (idx + 1) % 14;
+                        let next_index = indices[idx + 1];
+                        let next_offset = self.table.pattern_offsets[next_pattern_id] + next_index;
+
+                        unsafe {
+                            let ptr = self.table.data[stage].as_ptr().add(next_offset);
+                            // x86-64専用プリフェッチヒント
+                            crate::x86_64::prefetch_x86_64(ptr);
                         }
                     }
                 }
@@ -1259,6 +1321,48 @@ mod tests {
         );
         assert!(
             (scores[4] - 127.99609375).abs() < 0.0001,
+            "SIMD: u16 65535 should be ~127.996"
+        );
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_u16_to_score_simd_basic_x86_64() {
+        // x86-64 SIMD版実装（8個同時変換）
+        let values: [u16; 8] = [0, 10000, 20000, 32768, 40000, 50000, 60000, 65535];
+        let scores = u16_to_score_simd(&values);
+
+        // SIMD版とスカラー版が同じ結果を返すことを確認
+        for i in 0..8 {
+            let expected = u16_to_score(values[i]);
+            assert!(
+                (scores[i] - expected).abs() < 0.0001,
+                "SIMD conversion at index {} failed: expected {}, got {}",
+                i,
+                expected,
+                scores[i]
+            );
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn test_u16_to_score_simd_boundary_values_x86_64() {
+        // x86-64 SIMD版での境界値テスト
+        let values: [u16; 8] = [0, 0, 32768, 32768, 65535, 65535, 1000, 60000];
+        let scores = u16_to_score_simd(&values);
+
+        // 境界値の検証
+        assert!(
+            (scores[0] - (-128.0)).abs() < 0.0001,
+            "SIMD: u16 0 should be -128.0"
+        );
+        assert!(
+            (scores[2] - 0.0).abs() < 0.0001,
+            "SIMD: u16 32768 should be 0.0"
+        );
+        assert!(
+            (scores[4] - 127.996_09).abs() < 0.0001,
             "SIMD: u16 65535 should be ~127.996"
         );
     }

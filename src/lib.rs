@@ -8,6 +8,7 @@
 //! - [`pattern`] - パターン定義の読み込みと管理
 //! - [`evaluator`] - 評価関数とスコア変換
 //! - `arm64` - ARM64専用SIMD最適化（条件付きコンパイル）
+//! - `x86_64` - x86-64専用SIMD最適化（条件付きコンパイル）
 //!
 //! # 使用例
 //!
@@ -73,6 +74,11 @@
 //! - NEON SIMD命令による評価値変換の並列化
 //! - プリフェッチによるキャッシュミス削減
 //!
+//! ## x86-64最適化
+//!
+//! - SSE4.1/AVX2 SIMD命令による評価値変換の並列化
+//! - プリフェッチによるキャッシュミス削減
+//!
 //! # パフォーマンス目標
 //!
 //! - 合法手生成: 0.5μs以内
@@ -95,6 +101,10 @@ pub mod search;
 #[cfg(target_arch = "aarch64")]
 pub mod arm64;
 
+// x86-64専用最適化モジュール（条件付きコンパイル）
+#[cfg(target_arch = "x86_64")]
+pub mod x86_64;
+
 // PyO3 Python bindings module (feature-gated)
 #[cfg(feature = "pyo3")]
 pub mod python;
@@ -113,6 +123,10 @@ pub use search::{
 // ARM64最適化のre-export（条件付き）
 #[cfg(target_arch = "aarch64")]
 pub use arm64::{prefetch_arm64, u16_to_score_simd_arm64};
+
+// x86-64最適化のre-export（条件付き）
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::{prefetch_x86_64, u16_to_score_simd_x86_64};
 
 #[cfg(test)]
 mod tests {
