@@ -106,13 +106,13 @@ repos:
         language: pygrep
         files: ^src/(lib|main)\.rs$
 
-      # Forbid unsafe blocks outside arm64.rs and FFI modules
+      # Forbid unsafe blocks outside SIMD modules (arm64/x86_64) and FFI modules
       - id: no-unsafe-rs
         name: forbid unsafe outside approved modules
         entry: 'unsafe\s*\{'
         language: pygrep
         files: ^src/.*\.rs$
-        exclude: (^src/arm64\.rs$|^src/python/.*\.rs$|^src/evaluator\.rs$)
+        exclude: (^src/arm64\.rs$|^src/x86_64\.rs$|^src/python/.*\.rs$|^src/evaluator\.rs$)
 
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
