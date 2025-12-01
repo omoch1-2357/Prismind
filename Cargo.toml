@@ -24,7 +24,7 @@ flate2 = "1.1"            # Optional checkpoint compression (Req 3.9)
 serde_json = "1.0.145"
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = "3"            # Temporary directories for testing
 
 [features]

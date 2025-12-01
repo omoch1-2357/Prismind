@@ -1,5 +1,6 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use prismind::evaluator::{score_to_u16, u16_to_score};
+use std::hint::black_box;
 
 #[cfg(target_arch = "aarch64")]
 use criterion::BenchmarkId;

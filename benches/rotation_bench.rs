@@ -1,5 +1,6 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use prismind::board::BitBoard;
+use std::hint::black_box;
 
 fn bench_rotate_90(c: &mut Criterion) {
     let board = BitBoard::new();
