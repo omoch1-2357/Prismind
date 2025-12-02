@@ -104,6 +104,12 @@ pub const DEFAULT_RETENTION_COUNT: usize = 5;
 /// Checkpoint metadata containing training state information.
 ///
 /// Stores non-weight information about the training progress.
+///
+/// # Backward Compatibility
+///
+/// Fields added after v1 (`target_games`, `accumulated_wins`, etc.) are stored
+/// as Optional fields. When loading legacy checkpoints that lack these fields,
+/// they default to `None` or zero values, ensuring compatibility.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CheckpointMeta {
     /// Number of games completed at checkpoint time.
@@ -114,6 +120,19 @@ pub struct CheckpointMeta {
     pub adam_timestep: u64,
     /// Unix timestamp when checkpoint was created.
     pub created_at: u64,
+
+    // ===== Extended fields for resume support (v2+) =====
+    /// Target games for the training session (if set).
+    /// None for legacy checkpoints or when not set.
+    pub target_games: Option<u64>,
+    /// Accumulated win counts: (black_wins, white_wins, draws).
+    /// Used to restore win rate statistics on resume.
+    pub accumulated_wins: (u64, u64, u64),
+    /// Sum of stone differences for all games (for average calculation).
+    pub total_stone_diff_sum: f64,
+    /// Total number of games used for statistics calculation.
+    /// May differ from game_count if some games failed.
+    pub total_games_for_stats: u64,
 }
 
 impl CheckpointMeta {
@@ -135,6 +154,70 @@ impl CheckpointMeta {
             elapsed_time_secs,
             adam_timestep,
             created_at,
+            // Extended fields default to zero/None for new sessions
+            target_games: None,
+            accumulated_wins: (0, 0, 0),
+            total_stone_diff_sum: 0.0,
+            total_games_for_stats: 0,
+        }
+    }
+
+    /// Create checkpoint metadata with full statistics for resume support.
+    ///
+    /// # Arguments
+    ///
+    /// * `game_count` - Number of games completed
+    /// * `elapsed_time_secs` - Total elapsed training time in seconds
+    /// * `adam_timestep` - Adam optimizer timestep counter
+    /// * `target_games` - Target games for the training session
+    /// * `accumulated_wins` - Win counts (black, white, draw)
+    /// * `stone_diffs` - Vector of stone differences for statistics
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_statistics(
+        game_count: u64,
+        elapsed_time_secs: u64,
+        adam_timestep: u64,
+        target_games: Option<u64>,
+        accumulated_wins: (u64, u64, u64),
+        stone_diffs: &[f32],
+    ) -> Self {
+        let created_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let total_stone_diff_sum: f64 = stone_diffs.iter().map(|&x| x as f64).sum();
+        let total_games_for_stats = stone_diffs.len() as u64;
+
+        Self {
+            game_count,
+            elapsed_time_secs,
+            adam_timestep,
+            created_at,
+            target_games,
+            accumulated_wins,
+            total_stone_diff_sum,
+            total_games_for_stats,
+        }
+    }
+
+    /// Create a legacy-compatible metadata (without extended fields).
+    /// Used when reading old checkpoints.
+    pub fn legacy(
+        game_count: u64,
+        elapsed_time_secs: u64,
+        adam_timestep: u64,
+        created_at: u64,
+    ) -> Self {
+        Self {
+            game_count,
+            elapsed_time_secs,
+            adam_timestep,
+            created_at,
+            target_games: None,
+            accumulated_wins: (0, 0, 0),
+            total_stone_diff_sum: 0.0,
+            total_games_for_stats: 0,
         }
     }
 }
@@ -428,6 +511,64 @@ impl CheckpointManager {
         Ok(checkpoint_path)
     }
 
+    /// Save checkpoint with full metadata including extended statistics.
+    ///
+    /// This method preserves all training statistics for accurate resume.
+    /// Extended metadata is appended after the Adam moments, allowing
+    /// backward-compatible loading of older checkpoints.
+    ///
+    /// # Arguments
+    ///
+    /// * `eval_table` - Evaluation table with pattern weights
+    /// * `adam` - Adam optimizer state
+    /// * `patterns` - Pattern definitions
+    /// * `meta` - Full checkpoint metadata including statistics
+    ///
+    /// # Returns
+    ///
+    /// Path to saved checkpoint file.
+    pub fn save_with_metadata(
+        &self,
+        eval_table: &EvaluationTable,
+        adam: &AdamOptimizer,
+        patterns: &[Pattern],
+        meta: &CheckpointMeta,
+    ) -> Result<PathBuf, LearningError> {
+        let checkpoint_path = self.checkpoint_path(meta.game_count);
+        let temp_path = checkpoint_path.with_extension("tmp");
+        let file = File::create(&temp_path)?;
+        let mut writer = BufWriter::new(file);
+
+        // Write magic header
+        writer.write_all(CHECKPOINT_MAGIC)?;
+
+        // Write core metadata
+        writer.write_all(&meta.game_count.to_le_bytes())?;
+        writer.write_all(&meta.elapsed_time_secs.to_le_bytes())?;
+        writer.write_all(&meta.adam_timestep.to_le_bytes())?;
+        writer.write_all(&meta.created_at.to_le_bytes())?;
+
+        // Write evaluation table weights
+        self.write_eval_table(&mut writer, eval_table, patterns)?;
+
+        // Write Adam first moment (m) vectors
+        self.write_adam_moments(&mut writer, adam.first_moment(), patterns)?;
+
+        // Write Adam second moment (v) vectors
+        self.write_adam_moments(&mut writer, adam.second_moment(), patterns)?;
+
+        // Write extended metadata (new fields for resume support)
+        self.write_extended_metadata(&mut writer, meta)?;
+
+        writer.flush()?;
+        drop(writer);
+
+        // Atomic rename
+        std::fs::rename(&temp_path, &checkpoint_path)?;
+
+        Ok(checkpoint_path)
+    }
+
     /// Load checkpoint, returning restored state.
     ///
     /// # Arguments
@@ -483,12 +624,8 @@ impl CheckpointManager {
         reader.read_exact(&mut buf8)?;
         let created_at = u64::from_le_bytes(buf8);
 
-        let meta = CheckpointMeta {
-            game_count,
-            elapsed_time_secs,
-            adam_timestep,
-            created_at,
-        };
+        // Use legacy constructor for V1 format (doesn't have extended fields yet)
+        let meta = CheckpointMeta::legacy(game_count, elapsed_time_secs, adam_timestep, created_at);
 
         // Read evaluation table
         let eval_table = self.read_eval_table(&mut reader, patterns)?;
@@ -499,6 +636,9 @@ impl CheckpointManager {
 
         self.read_adam_moments(&mut reader, adam.first_moment_mut(), patterns)?;
         self.read_adam_moments(&mut reader, adam.second_moment_mut(), patterns)?;
+
+        // Try to read extended metadata (may not exist in older checkpoints)
+        let meta = self.read_extended_metadata(&mut reader, meta);
 
         Ok((eval_table, adam, meta))
     }
@@ -549,12 +689,13 @@ impl CheckpointManager {
         reader.read_exact(&mut buf8)?;
         let created_at = u64::from_le_bytes(buf8);
 
-        Ok(CheckpointMeta {
+        // Use legacy constructor for V1 format verification
+        Ok(CheckpointMeta::legacy(
             game_count,
             elapsed_time_secs,
             adam_timestep,
             created_at,
-        })
+        ))
     }
 
     /// Find the latest checkpoint in the directory.
@@ -747,6 +888,112 @@ impl CheckpointManager {
         3_usize.pow(patterns[pattern_id].k as u32)
     }
 
+    /// Write extended metadata to writer.
+    ///
+    /// Extended metadata format (backward compatible - appended after main data):
+    /// - 8 bytes: Magic marker "EXTMETA\0" for detection
+    /// - 8 bytes: target_games (u64, or 0 if None)
+    /// - 1 byte: has_target_games flag (0 or 1)
+    /// - 8 bytes: black_wins (u64)
+    /// - 8 bytes: white_wins (u64)
+    /// - 8 bytes: draws (u64)
+    /// - 8 bytes: total_stone_diff_sum (f64)
+    /// - 8 bytes: total_games_for_stats (u64)
+    fn write_extended_metadata<W: Write>(
+        &self,
+        writer: &mut W,
+        meta: &CheckpointMeta,
+    ) -> Result<(), LearningError> {
+        // Magic marker for extended metadata detection
+        writer.write_all(b"EXTMETA\0")?;
+
+        // target_games and flag
+        let (target, has_target) = match meta.target_games {
+            Some(t) => (t, 1u8),
+            None => (0, 0u8),
+        };
+        writer.write_all(&target.to_le_bytes())?;
+        writer.write_all(&[has_target])?;
+
+        // accumulated_wins
+        writer.write_all(&meta.accumulated_wins.0.to_le_bytes())?;
+        writer.write_all(&meta.accumulated_wins.1.to_le_bytes())?;
+        writer.write_all(&meta.accumulated_wins.2.to_le_bytes())?;
+
+        // stone diff statistics
+        writer.write_all(&meta.total_stone_diff_sum.to_le_bytes())?;
+        writer.write_all(&meta.total_games_for_stats.to_le_bytes())?;
+
+        Ok(())
+    }
+
+    /// Read extended metadata from reader (if present).
+    ///
+    /// Returns updated CheckpointMeta with extended fields populated,
+    /// or the original meta if extended data is not present.
+    fn read_extended_metadata<R: Read>(
+        &self,
+        reader: &mut R,
+        mut meta: CheckpointMeta,
+    ) -> CheckpointMeta {
+        // Try to read magic marker
+        let mut magic = [0u8; 8];
+        if reader.read_exact(&mut magic).is_err() {
+            return meta; // No extended metadata (legacy checkpoint)
+        }
+
+        if &magic != b"EXTMETA\0" {
+            return meta; // Not extended metadata marker
+        }
+
+        // Read target_games
+        let mut buf8 = [0u8; 8];
+        if reader.read_exact(&mut buf8).is_err() {
+            return meta;
+        }
+        let target_value = u64::from_le_bytes(buf8);
+
+        let mut buf1 = [0u8; 1];
+        if reader.read_exact(&mut buf1).is_err() {
+            return meta;
+        }
+        meta.target_games = if buf1[0] != 0 {
+            Some(target_value)
+        } else {
+            None
+        };
+
+        // Read accumulated_wins
+        if reader.read_exact(&mut buf8).is_err() {
+            return meta;
+        }
+        let black_wins = u64::from_le_bytes(buf8);
+
+        if reader.read_exact(&mut buf8).is_err() {
+            return meta;
+        }
+        let white_wins = u64::from_le_bytes(buf8);
+
+        if reader.read_exact(&mut buf8).is_err() {
+            return meta;
+        }
+        let draws = u64::from_le_bytes(buf8);
+        meta.accumulated_wins = (black_wins, white_wins, draws);
+
+        // Read stone diff statistics
+        if reader.read_exact(&mut buf8).is_err() {
+            return meta;
+        }
+        meta.total_stone_diff_sum = f64::from_le_bytes(buf8);
+
+        if reader.read_exact(&mut buf8).is_err() {
+            return meta;
+        }
+        meta.total_games_for_stats = u64::from_le_bytes(buf8);
+
+        meta
+    }
+
     /// Get the checkpoint directory path.
     pub fn checkpoint_dir(&self) -> &Path {
         &self.checkpoint_dir
@@ -789,6 +1036,15 @@ pub struct EnhancedCheckpointManager {
     /// Whether to compress checkpoint data.
     compression_enabled: bool,
 }
+
+/// Type alias for extended metadata returned by read_extended_metadata.
+///
+/// Tuple components:
+/// - `Option<u64>`: target_games
+/// - `(u64, u64, u64)`: accumulated_wins (black, white, draws)
+/// - `f64`: total_stone_diff_sum
+/// - `u64`: total_games_for_stats
+type ExtendedMetadata = (Option<u64>, (u64, u64, u64), f64, u64);
 
 impl EnhancedCheckpointManager {
     /// Create a new enhanced checkpoint manager.
@@ -877,16 +1133,42 @@ impl EnhancedCheckpointManager {
         patterns: &[Pattern],
         elapsed_time_secs: u64,
     ) -> Result<(PathBuf, u64, f64), LearningError> {
+        // Create basic metadata without extended statistics
+        let meta = CheckpointMeta::new(game_count, elapsed_time_secs, adam.timestep());
+        self.save_with_metadata(eval_table, adam, patterns, &meta)
+    }
+
+    /// Save checkpoint with full metadata including extended statistics.
+    ///
+    /// This method preserves all training statistics for accurate resume.
+    ///
+    /// # Arguments
+    ///
+    /// * `eval_table` - Evaluation table with pattern weights
+    /// * `adam` - Adam optimizer state
+    /// * `patterns` - Pattern definitions
+    /// * `meta` - Full checkpoint metadata including statistics
+    ///
+    /// # Returns
+    ///
+    /// Tuple of (path, file_size_bytes, save_duration_secs).
+    pub fn save_with_metadata(
+        &self,
+        eval_table: &EvaluationTable,
+        adam: &AdamOptimizer,
+        patterns: &[Pattern],
+        meta: &CheckpointMeta,
+    ) -> Result<(PathBuf, u64, f64), LearningError> {
         let start_time = Instant::now();
-        let checkpoint_path = self.checkpoint_path(game_count);
+        let checkpoint_path = self.checkpoint_path(meta.game_count);
         let temp_path = checkpoint_path.with_extension("tmp");
 
         // Serialize data to buffer
         let mut data_buffer = Vec::new();
 
         // Write elapsed_time_secs and adam_timestep to data buffer
-        data_buffer.extend_from_slice(&elapsed_time_secs.to_le_bytes());
-        data_buffer.extend_from_slice(&adam.timestep().to_le_bytes());
+        data_buffer.extend_from_slice(&meta.elapsed_time_secs.to_le_bytes());
+        data_buffer.extend_from_slice(&meta.adam_timestep.to_le_bytes());
 
         // Write evaluation table
         self.write_eval_table_to_buffer(&mut data_buffer, eval_table, patterns)?;
@@ -894,6 +1176,9 @@ impl EnhancedCheckpointManager {
         // Write Adam moments
         self.write_adam_moments_to_buffer(&mut data_buffer, adam.first_moment(), patterns)?;
         self.write_adam_moments_to_buffer(&mut data_buffer, adam.second_moment(), patterns)?;
+
+        // Write extended metadata for resume support
+        self.write_extended_metadata_to_buffer(&mut data_buffer, meta);
 
         // Optionally compress data
         let final_data = if self.compression_enabled {
@@ -910,7 +1195,7 @@ impl EnhancedCheckpointManager {
         let checksum = hasher.finalize();
 
         // Create header with checksum
-        let mut header = CheckpointHeader::new(game_count, self.compression_enabled);
+        let mut header = CheckpointHeader::new(meta.game_count, self.compression_enabled);
         header.set_checksum(checksum);
 
         // Write to temp file
@@ -1013,11 +1298,20 @@ impl EnhancedCheckpointManager {
         self.read_adam_moments_from_reader(&mut cursor, adam.first_moment_mut(), patterns)?;
         self.read_adam_moments_from_reader(&mut cursor, adam.second_moment_mut(), patterns)?;
 
+        // Try to read extended metadata (may not exist in older checkpoints)
+        let (target_games, accumulated_wins, total_stone_diff_sum, total_games_for_stats) = self
+            .read_extended_metadata(&mut cursor)
+            .unwrap_or((None, (0, 0, 0), 0.0, 0));
+
         let meta = CheckpointMeta {
             game_count: header.games_completed,
             elapsed_time_secs,
             adam_timestep,
             created_at: header.timestamp as u64,
+            target_games,
+            accumulated_wins,
+            total_stone_diff_sum,
+            total_games_for_stats,
         };
 
         Ok((eval_table, adam, meta))
@@ -1257,6 +1551,91 @@ impl EnhancedCheckpointManager {
             }
         }
         Ok(())
+    }
+
+    /// Write extended metadata to buffer.
+    ///
+    /// Extended metadata format:
+    /// - 8 bytes: Magic marker "EXTMETA\0" for detection
+    /// - 8 bytes: target_games (u64, or 0 if None)
+    /// - 1 byte: has_target_games flag (0 or 1)
+    /// - 8 bytes: black_wins (u64)
+    /// - 8 bytes: white_wins (u64)
+    /// - 8 bytes: draws (u64)
+    /// - 8 bytes: total_stone_diff_sum (f64)
+    /// - 8 bytes: total_games_for_stats (u64)
+    fn write_extended_metadata_to_buffer(&self, buffer: &mut Vec<u8>, meta: &CheckpointMeta) {
+        // Magic marker for extended metadata detection
+        buffer.extend_from_slice(b"EXTMETA\0");
+
+        // target_games and flag
+        let (target, has_target) = match meta.target_games {
+            Some(t) => (t, 1u8),
+            None => (0, 0u8),
+        };
+        buffer.extend_from_slice(&target.to_le_bytes());
+        buffer.push(has_target);
+
+        // accumulated_wins
+        buffer.extend_from_slice(&meta.accumulated_wins.0.to_le_bytes());
+        buffer.extend_from_slice(&meta.accumulated_wins.1.to_le_bytes());
+        buffer.extend_from_slice(&meta.accumulated_wins.2.to_le_bytes());
+
+        // stone diff statistics
+        buffer.extend_from_slice(&meta.total_stone_diff_sum.to_le_bytes());
+        buffer.extend_from_slice(&meta.total_games_for_stats.to_le_bytes());
+    }
+
+    /// Read extended metadata from reader (if present).
+    ///
+    /// Returns None if extended metadata is not present (legacy checkpoint).
+    fn read_extended_metadata<R: Read>(&self, reader: &mut R) -> Option<ExtendedMetadata> {
+        // Try to read magic marker
+        let mut magic = [0u8; 8];
+        if reader.read_exact(&mut magic).is_err() {
+            return None;
+        }
+
+        if &magic != b"EXTMETA\0" {
+            return None;
+        }
+
+        // Read target_games
+        let mut buf8 = [0u8; 8];
+        reader.read_exact(&mut buf8).ok()?;
+        let target_value = u64::from_le_bytes(buf8);
+
+        let mut buf1 = [0u8; 1];
+        reader.read_exact(&mut buf1).ok()?;
+        let target_games = if buf1[0] != 0 {
+            Some(target_value)
+        } else {
+            None
+        };
+
+        // Read accumulated_wins
+        reader.read_exact(&mut buf8).ok()?;
+        let black_wins = u64::from_le_bytes(buf8);
+
+        reader.read_exact(&mut buf8).ok()?;
+        let white_wins = u64::from_le_bytes(buf8);
+
+        reader.read_exact(&mut buf8).ok()?;
+        let draws = u64::from_le_bytes(buf8);
+
+        // Read stone diff statistics
+        reader.read_exact(&mut buf8).ok()?;
+        let total_stone_diff_sum = f64::from_le_bytes(buf8);
+
+        reader.read_exact(&mut buf8).ok()?;
+        let total_games_for_stats = u64::from_le_bytes(buf8);
+
+        Some((
+            target_games,
+            (black_wins, white_wins, draws),
+            total_stone_diff_sum,
+            total_games_for_stats,
+        ))
     }
 
     /// Get number of entries for a pattern.
@@ -1600,6 +1979,90 @@ mod tests {
         assert_eq!(meta.elapsed_time_secs, 3600);
         assert_eq!(meta.adam_timestep, 50);
         assert!(meta.created_at > 0);
+    }
+
+    // ========== Extended Metadata Tests (Resume Support) ==========
+
+    #[test]
+    fn test_checkpoint_with_extended_metadata() {
+        let temp_dir = tempdir().unwrap();
+        let manager = CheckpointManager::new(temp_dir.path()).unwrap();
+
+        let patterns = create_test_patterns();
+        let table = EvaluationTable::from_patterns(&patterns);
+        let adam = AdamOptimizer::new(&patterns);
+
+        // Create metadata with statistics
+        let stone_diffs: Vec<f32> = vec![5.0, -3.0, 2.0, 0.0, 7.0];
+        let meta = CheckpointMeta::with_statistics(
+            50000,
+            3600,
+            100,
+            Some(100000), // target_games
+            (3, 1, 1),    // accumulated_wins (black, white, draw)
+            &stone_diffs,
+        );
+
+        // Save with extended metadata
+        let path = manager
+            .save_with_metadata(&table, &adam, &patterns, &meta)
+            .unwrap();
+
+        // Load and verify
+        let (_, _, loaded_meta) = manager.load(&path, &patterns).unwrap();
+
+        assert_eq!(loaded_meta.game_count, 50000);
+        assert_eq!(loaded_meta.elapsed_time_secs, 3600);
+        assert_eq!(loaded_meta.adam_timestep, 100);
+        assert_eq!(loaded_meta.target_games, Some(100000));
+        assert_eq!(loaded_meta.accumulated_wins, (3, 1, 1));
+        assert!((loaded_meta.total_stone_diff_sum - 11.0).abs() < 0.001);
+        assert_eq!(loaded_meta.total_games_for_stats, 5);
+    }
+
+    #[test]
+    fn test_legacy_checkpoint_loads_with_default_extended_metadata() {
+        let temp_dir = tempdir().unwrap();
+        let manager = CheckpointManager::new(temp_dir.path()).unwrap();
+
+        let patterns = create_test_patterns();
+        let table = EvaluationTable::from_patterns(&patterns);
+        let adam = AdamOptimizer::new(&patterns);
+
+        // Save using old method (without extended metadata)
+        let path = manager.save(25000, &table, &adam, &patterns, 1800).unwrap();
+
+        // Load and verify extended fields have default values
+        let (_, _, loaded_meta) = manager.load(&path, &patterns).unwrap();
+
+        assert_eq!(loaded_meta.game_count, 25000);
+        assert_eq!(loaded_meta.elapsed_time_secs, 1800);
+        // Extended fields should be defaults (backward compatible)
+        assert_eq!(loaded_meta.target_games, None);
+        assert_eq!(loaded_meta.accumulated_wins, (0, 0, 0));
+        assert_eq!(loaded_meta.total_stone_diff_sum, 0.0);
+        assert_eq!(loaded_meta.total_games_for_stats, 0);
+    }
+
+    #[test]
+    fn test_checkpoint_meta_with_statistics() {
+        let stone_diffs = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let meta = CheckpointMeta::with_statistics(
+            10000,
+            600,
+            50,
+            Some(50000),
+            (100, 50, 10),
+            &stone_diffs,
+        );
+
+        assert_eq!(meta.game_count, 10000);
+        assert_eq!(meta.elapsed_time_secs, 600);
+        assert_eq!(meta.adam_timestep, 50);
+        assert_eq!(meta.target_games, Some(50000));
+        assert_eq!(meta.accumulated_wins, (100, 50, 10));
+        assert!((meta.total_stone_diff_sum - 15.0).abs() < 0.001);
+        assert_eq!(meta.total_games_for_stats, 5);
     }
 
     // ========== Requirements Summary Test ==========

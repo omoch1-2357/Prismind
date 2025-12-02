@@ -497,6 +497,18 @@ impl TrainingEngine {
             meta.game_count, meta.elapsed_time_secs
         ));
 
+        // Log restored statistics if available
+        if meta.total_games_for_stats > 0 {
+            logger.log_info(&format!(
+                "Restored statistics: {} wins (B:{}/W:{}/D:{}), avg stone diff: {:.2}",
+                meta.accumulated_wins.0 + meta.accumulated_wins.1 + meta.accumulated_wins.2,
+                meta.accumulated_wins.0,
+                meta.accumulated_wins.1,
+                meta.accumulated_wins.2,
+                meta.total_stone_diff_sum / meta.total_games_for_stats as f64
+            ));
+        }
+
         // Initialize convergence monitor
         let convergence = ConvergenceMonitor::new(TOTAL_PATTERN_ENTRIES);
 
@@ -506,6 +518,16 @@ impl TrainingEngine {
 
         // Setup interrupt handler (uses global OnceLock for single registration)
         let interrupted = setup_signal_handler()?;
+
+        // Restore accumulated statistics from checkpoint metadata
+        let accumulated_stone_diffs = if meta.total_games_for_stats > 0 {
+            // We can't restore individual values, but we can create a representative vector
+            // that will produce the same average. This is sufficient for progress reporting.
+            let avg = (meta.total_stone_diff_sum / meta.total_games_for_stats as f64) as f32;
+            vec![avg; meta.total_games_for_stats as usize]
+        } else {
+            Vec::new()
+        };
 
         Ok(Self {
             patterns,
@@ -525,10 +547,11 @@ impl TrainingEngine {
             // Phase 4 Task 5: State machine initialization (Paused state on resume)
             state: Arc::new(AtomicU8::new(TrainingState::Paused as u8)),
             pause_flag: Arc::new(AtomicBool::new(false)),
-            target_games: Arc::new(AtomicU64::new(0)),
+            target_games: Arc::new(AtomicU64::new(meta.target_games.unwrap_or(0))),
             callback_interval: DEFAULT_CALLBACK_INTERVAL,
-            accumulated_stone_diffs: Vec::new(),
-            accumulated_wins: (0, 0, 0),
+            // Restore accumulated statistics from checkpoint
+            accumulated_stone_diffs,
+            accumulated_wins: meta.accumulated_wins,
         })
     }
 
@@ -896,10 +919,20 @@ impl TrainingEngine {
         let checkpoint_mgr = &self.checkpoint_mgr;
         let adam = &self.adam;
 
+        // Create full metadata with statistics for resume support
+        let meta = CheckpointMeta::with_statistics(
+            game_count,
+            elapsed,
+            adam.timestep(),
+            Some(self.target_games.load(Ordering::SeqCst)).filter(|&t| t > 0),
+            self.accumulated_wins,
+            &self.accumulated_stone_diffs,
+        );
+
         // Req 12.2: Use retry logic for checkpoint save
         let mut saved_path: Option<PathBuf> = None;
         let save_result = save_checkpoint_with_retry(|| {
-            let path = checkpoint_mgr.save(game_count, &table, adam, &self.patterns, elapsed)?;
+            let path = checkpoint_mgr.save_with_metadata(&table, adam, &self.patterns, &meta)?;
             saved_path = Some(path);
             Ok(())
         });
@@ -1575,12 +1608,29 @@ impl TrainingEngine {
         self.clear_pause_flag();
 
         // The actual training will be started by calling start_training_with_callback again
+        // Keep the target_games value so the caller can query it if needed
         self.set_state(TrainingState::Idle);
 
-        self.logger
-            .log_info(&format!("Training resumed from game {}", self.game_count));
+        let target = self.target_games.load(Ordering::SeqCst);
+        self.logger.log_info(&format!(
+            "Training ready to resume from game {} (target: {})",
+            self.game_count,
+            if target > 0 {
+                target.to_string()
+            } else {
+                "not set".to_string()
+            }
+        ));
 
         Ok(())
+    }
+
+    /// Get the target games count.
+    ///
+    /// Returns the target game count if set, or None if not set.
+    pub fn target_games(&self) -> Option<u64> {
+        let target = self.target_games.load(Ordering::SeqCst);
+        if target > 0 { Some(target) } else { None }
     }
 
     /// Execute a single self-play game and return statistics.
