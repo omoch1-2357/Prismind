@@ -622,6 +622,9 @@ impl TrainingEngine {
                 return self.shutdown();
             }
 
+            // Save game count before batch for checkpoint boundary detection
+            let game_count_before_batch = self.game_count;
+
             // Determine batch size
             let remaining = target_games - self.game_count;
             let batch_size = remaining.min(self.config.num_threads as u64);
@@ -770,11 +773,11 @@ impl TrainingEngine {
                 detailed_search_times.clear();
             }
 
-            // Checkpoint (every 100,000 games)
-            if self
-                .game_count
-                .is_multiple_of(self.config.checkpoint_interval)
-            {
+            // Checkpoint: check if we crossed a checkpoint boundary
+            // This handles the case where batch processing skips over exact multiples
+            let prev_checkpoint_num = game_count_before_batch / self.config.checkpoint_interval;
+            let curr_checkpoint_num = self.game_count / self.config.checkpoint_interval;
+            if prev_checkpoint_num < curr_checkpoint_num {
                 self.save_checkpoint()?;
             }
         }
@@ -1244,6 +1247,9 @@ impl TrainingEngine {
                 return self.handle_training_stop(false, true);
             }
 
+            // Save game count before batch for checkpoint boundary detection
+            let game_count_before_batch = self.game_count;
+
             // Determine batch size
             let remaining = target_games - self.game_count;
             let batch_size = remaining.min(self.config.num_threads as u64);
@@ -1393,11 +1399,11 @@ impl TrainingEngine {
                 detailed_search_times.clear();
             }
 
-            // Checkpoint (every checkpoint_interval games)
-            if self
-                .game_count
-                .is_multiple_of(self.config.checkpoint_interval)
-            {
+            // Checkpoint: check if we crossed a checkpoint boundary
+            // This handles the case where batch processing skips over exact multiples
+            let prev_checkpoint_num = game_count_before_batch / self.config.checkpoint_interval;
+            let curr_checkpoint_num = self.game_count / self.config.checkpoint_interval;
+            if prev_checkpoint_num < curr_checkpoint_num {
                 self.save_checkpoint()?;
             }
         }
