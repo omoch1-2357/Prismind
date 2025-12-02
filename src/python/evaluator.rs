@@ -67,10 +67,41 @@ impl PyEvaluator {
     #[pyo3(signature = (checkpoint_path=None))]
     pub fn new(checkpoint_path: Option<&str>) -> PyResult<Self> {
         // Create evaluation table
-        let table = if let Some(_path) = checkpoint_path {
-            // TODO: Implement checkpoint loading in Task 3
-            // For now, create default table
-            EvaluationTable::new()
+        let table = if let Some(path) = checkpoint_path {
+            // Load checkpoint and extract evaluation table
+            // Try V1 format first, then V2 (Enhanced) format
+            use crate::learning::checkpoint::{CheckpointManager, EnhancedCheckpointManager};
+            use crate::python::checkpoint_manager::create_default_patterns;
+            use std::path::PathBuf;
+
+            let patterns = create_default_patterns();
+            let checkpoint_dir = PathBuf::from(path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| ".".to_string());
+
+            // Try V1 format first
+            let v1_result = CheckpointManager::new(&checkpoint_dir)
+                .and_then(|manager| manager.load(&PathBuf::from(path), &patterns));
+
+            match v1_result {
+                Ok((eval_table, _adam, _meta)) => eval_table,
+                Err(_v1_err) => {
+                    // Try V2 (Enhanced) format
+                    let v2_result = EnhancedCheckpointManager::new(&checkpoint_dir, 5, false)
+                        .and_then(|manager| manager.load(&PathBuf::from(path), &patterns));
+
+                    match v2_result {
+                        Ok((eval_table, _adam, _meta)) => eval_table,
+                        Err(v2_err) => {
+                            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                                "Failed to load checkpoint '{}': {}",
+                                path, v2_err
+                            )));
+                        }
+                    }
+                }
+            }
         } else {
             EvaluationTable::new()
         };

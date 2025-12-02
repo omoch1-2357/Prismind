@@ -376,18 +376,16 @@ class ModelPlayer:
 
         best_move = None
         best_score = float("-inf")
+        opponent = get_opponent(player)
 
         for move in legal_moves:
             # Make the move and evaluate the resulting position
             new_board = make_move(board, move, player)
 
-            # Evaluate from the model's perspective
-            # Positive scores favor black
-            score = self.evaluator.evaluate(new_board, player)
-
-            # If playing as white, negate the score
-            if player == WHITE:
-                score = -score
+            # After making a move, it becomes opponent's turn
+            # Evaluate from opponent's perspective, then negate
+            # because a good position for opponent is bad for us
+            score = -self.evaluator.evaluate(new_board, opponent)
 
             if score > best_score:
                 best_score = score

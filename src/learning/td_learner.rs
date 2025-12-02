@@ -244,6 +244,19 @@ impl TDLearner {
                 stats.max_td_error = td_error.abs();
             }
 
+            // IMPORTANT: Increment eligibility traces FIRST for the current position
+            // This ensures the current position contributes to its own update.
+            // Req 2.2: Increment trace by 1.0 on pattern visit
+            for rotation in 0..NUM_ROTATIONS {
+                for pattern_id in 0..NUM_PATTERNS {
+                    let idx = rotation * NUM_PATTERNS + pattern_id;
+                    let pattern_index = record.pattern_indices[idx];
+                    let stage = record.stage;
+
+                    self.trace.increment(pattern_id, stage, pattern_index);
+                }
+            }
+
             // Update all 56 pattern instances
             // Req 1.6: Update all 56 pattern instances per position
             for rotation in 0..NUM_ROTATIONS {
@@ -252,7 +265,7 @@ impl TDLearner {
                     let pattern_index = record.pattern_indices[idx];
                     let stage = record.stage;
 
-                    // Get eligibility trace for this entry
+                    // Get eligibility trace for this entry (now includes current position)
                     let eligibility = self.trace.get(pattern_id, stage, pattern_index);
 
                     // Compute gradient
@@ -280,21 +293,10 @@ impl TDLearner {
                 }
             }
 
-            // Decay all eligibility traces
+            // Decay all eligibility traces AFTER the update
             // Req 2.3: Decay traces by lambda at each reverse step
+            // This prepares the traces for the next (earlier) position
             self.trace.decay(self.lambda);
-
-            // Increment eligibility traces for patterns visited at this position
-            // Req 2.2: Increment trace by 1.0 on pattern visit
-            for rotation in 0..NUM_ROTATIONS {
-                for pattern_id in 0..NUM_PATTERNS {
-                    let idx = rotation * NUM_PATTERNS + pattern_id;
-                    let pattern_index = record.pattern_indices[idx];
-                    let stage = record.stage;
-
-                    self.trace.increment(pattern_id, stage, pattern_index);
-                }
-            }
 
             // Update next_value for the next iteration
             // The next position's target will use this value

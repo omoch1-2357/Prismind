@@ -594,25 +594,19 @@ impl Evaluator {
     }
 
     /// Get default pattern definitions for standalone evaluator.
+    /// Loads patterns dynamically from patterns.csv.
     fn default_patterns() -> [Pattern; 14] {
-        // Create minimal pattern definitions for evaluation
-        // These don't need actual positions since the table handles indexing
-        [
-            Pattern::new(0, 10, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap(),
-            Pattern::new(1, 10, vec![0, 8, 16, 24, 32, 40, 48, 56, 1, 9]).unwrap(),
-            Pattern::new(2, 10, vec![0, 1, 8, 9, 10, 16, 17, 18, 24, 25]).unwrap(),
-            Pattern::new(3, 10, vec![0, 9, 18, 27, 36, 45, 54, 63, 1, 10]).unwrap(),
-            Pattern::new(4, 8, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap(),
-            Pattern::new(5, 8, vec![0, 8, 16, 24, 32, 40, 48, 56]).unwrap(),
-            Pattern::new(6, 8, vec![0, 9, 18, 27, 36, 45, 54, 63]).unwrap(),
-            Pattern::new(7, 8, vec![7, 14, 21, 28, 35, 42, 49, 56]).unwrap(),
-            Pattern::new(8, 7, vec![0, 1, 2, 3, 4, 5, 6]).unwrap(),
-            Pattern::new(9, 7, vec![0, 8, 16, 24, 32, 40, 48]).unwrap(),
-            Pattern::new(10, 6, vec![0, 1, 2, 3, 4, 5]).unwrap(),
-            Pattern::new(11, 6, vec![0, 8, 16, 24, 32, 40]).unwrap(),
-            Pattern::new(12, 5, vec![0, 1, 2, 3, 4]).unwrap(),
-            Pattern::new(13, 5, vec![0, 8, 16, 24, 32]).unwrap(),
-        ]
+        // Try multiple possible locations for patterns.csv
+        let path = "patterns.csv";
+
+        if let Ok(patterns_vec) = crate::pattern::load_patterns(path) {
+            let patterns: [Pattern; 14] = patterns_vec
+                .try_into()
+                .expect("patterns.csv must contain exactly 14 patterns");
+            return patterns;
+        }
+
+        panic!("Could not find patterns.csv in any expected location");
     }
 
     /// Create an Evaluator from an existing EvaluationTable.

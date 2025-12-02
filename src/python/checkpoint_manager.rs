@@ -372,27 +372,29 @@ impl PyCheckpointManager {
     }
 }
 
+/// Load patterns from patterns.csv file.
+///
+/// Dynamically loads pattern definitions from the CSV file to ensure
+/// consistency across all components.
+///
+/// # Panics
+///
+/// Panics if patterns.csv cannot be found or parsed.
+pub fn load_patterns_from_csv() -> Vec<Pattern> {
+    let path = "patterns.csv";
+
+    if let Ok(patterns) = crate::pattern::load_patterns(path) {
+        return patterns;
+    }
+
+    panic!("Could not find patterns.csv");
+}
+
 /// Create default patterns for checkpoint operations.
 ///
-/// These patterns match the standard Othello pattern configuration
-/// used throughout the system.
-fn create_default_patterns() -> Vec<Pattern> {
-    vec![
-        Pattern::new(0, 10, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap(),
-        Pattern::new(1, 10, vec![0, 8, 16, 24, 32, 40, 48, 56, 1, 9]).unwrap(),
-        Pattern::new(2, 10, vec![0, 1, 8, 9, 10, 16, 17, 18, 24, 25]).unwrap(),
-        Pattern::new(3, 10, vec![0, 9, 18, 27, 36, 45, 54, 63, 1, 10]).unwrap(),
-        Pattern::new(4, 8, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap(),
-        Pattern::new(5, 8, vec![0, 8, 16, 24, 32, 40, 48, 56]).unwrap(),
-        Pattern::new(6, 8, vec![0, 9, 18, 27, 36, 45, 54, 63]).unwrap(),
-        Pattern::new(7, 8, vec![7, 14, 21, 28, 35, 42, 49, 56]).unwrap(),
-        Pattern::new(8, 6, vec![0, 1, 2, 3, 4, 5]).unwrap(),
-        Pattern::new(9, 6, vec![0, 8, 16, 24, 32, 40]).unwrap(),
-        Pattern::new(10, 5, vec![0, 1, 2, 3, 4]).unwrap(),
-        Pattern::new(11, 5, vec![0, 8, 16, 24, 32]).unwrap(),
-        Pattern::new(12, 4, vec![0, 1, 2, 3]).unwrap(),
-        Pattern::new(13, 4, vec![0, 8, 16, 24]).unwrap(),
-    ]
+/// Loads patterns dynamically from patterns.csv.
+pub fn create_default_patterns() -> Vec<Pattern> {
+    load_patterns_from_csv()
 }
 
 #[cfg(test)]
