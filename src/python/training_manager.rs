@@ -305,8 +305,10 @@ impl PyTrainingManager {
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("Engine not initialized"))?;
 
-        // Set callback interval on engine
+        // Update engine settings (critical for resume scenarios where config may differ)
         engine.set_callback_interval(callback_interval);
+        engine.set_checkpoint_interval(checkpoint_interval);
+        engine.set_search_time_ms(search_time_ms);
 
         // Get callback if set (need to clone the PyObject with GIL)
         let callback_clone = {

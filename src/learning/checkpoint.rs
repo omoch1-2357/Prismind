@@ -171,7 +171,8 @@ impl CheckpointMeta {
     /// * `adam_timestep` - Adam optimizer timestep counter
     /// * `target_games` - Target games for the training session
     /// * `accumulated_wins` - Win counts (black, white, draw)
-    /// * `stone_diffs` - Vector of stone differences for statistics
+    /// * `total_stone_diff_sum` - Sum of all stone differences
+    /// * `total_games_for_stats` - Number of games contributing to statistics
     #[allow(clippy::too_many_arguments)]
     pub fn with_statistics(
         game_count: u64,
@@ -179,15 +180,13 @@ impl CheckpointMeta {
         adam_timestep: u64,
         target_games: Option<u64>,
         accumulated_wins: (u64, u64, u64),
-        stone_diffs: &[f32],
+        total_stone_diff_sum: f64,
+        total_games_for_stats: u64,
     ) -> Self {
         let created_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-
-        let total_stone_diff_sum: f64 = stone_diffs.iter().map(|&x| x as f64).sum();
-        let total_games_for_stats = stone_diffs.len() as u64;
 
         Self {
             game_count,
@@ -1993,14 +1992,17 @@ mod tests {
         let adam = AdamOptimizer::new(&patterns);
 
         // Create metadata with statistics
-        let stone_diffs: Vec<f32> = vec![5.0, -3.0, 2.0, 0.0, 7.0];
+        // Using sum and count instead of Vec<f32>
+        let total_stone_diff_sum = 5.0 + (-3.0) + 2.0 + 0.0 + 7.0; // = 11.0
+        let total_games_for_stats = 5;
         let meta = CheckpointMeta::with_statistics(
             50000,
             3600,
             100,
             Some(100000), // target_games
             (3, 1, 1),    // accumulated_wins (black, white, draw)
-            &stone_diffs,
+            total_stone_diff_sum,
+            total_games_for_stats,
         );
 
         // Save with extended metadata
@@ -2046,14 +2048,17 @@ mod tests {
 
     #[test]
     fn test_checkpoint_meta_with_statistics() {
-        let stone_diffs = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        // Using sum and count directly instead of Vec
+        let total_stone_diff_sum = 1.0 + 2.0 + 3.0 + 4.0 + 5.0; // = 15.0
+        let total_games_for_stats = 5;
         let meta = CheckpointMeta::with_statistics(
             10000,
             600,
             50,
             Some(50000),
             (100, 50, 10),
-            &stone_diffs,
+            total_stone_diff_sum,
+            total_games_for_stats,
         );
 
         assert_eq!(meta.game_count, 10000);

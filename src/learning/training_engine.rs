@@ -345,8 +345,9 @@ pub struct TrainingEngine {
     target_games: Arc<AtomicU64>,
     /// Callback interval in games (default: 100).
     callback_interval: u64,
-    /// Accumulated stone differences for progress tracking.
-    accumulated_stone_diffs: Vec<f32>,
+    /// Accumulated stone difference statistics: (sum, count).
+    /// Using sum and count instead of Vec<f32> to avoid memory issues on resume.
+    accumulated_stone_diff_stats: (f64, u64),
     /// Accumulated win counts (black, white, draw) for progress tracking.
     accumulated_wins: (u64, u64, u64),
 }
@@ -439,7 +440,7 @@ impl TrainingEngine {
             pause_flag: Arc::new(AtomicBool::new(false)),
             target_games: Arc::new(AtomicU64::new(0)),
             callback_interval: DEFAULT_CALLBACK_INTERVAL,
-            accumulated_stone_diffs: Vec::new(),
+            accumulated_stone_diff_stats: (0.0, 0),
             accumulated_wins: (0, 0, 0),
         })
     }
@@ -520,14 +521,8 @@ impl TrainingEngine {
         let interrupted = setup_signal_handler()?;
 
         // Restore accumulated statistics from checkpoint metadata
-        let accumulated_stone_diffs = if meta.total_games_for_stats > 0 {
-            // We can't restore individual values, but we can create a representative vector
-            // that will produce the same average. This is sufficient for progress reporting.
-            let avg = (meta.total_stone_diff_sum / meta.total_games_for_stats as f64) as f32;
-            vec![avg; meta.total_games_for_stats as usize]
-        } else {
-            Vec::new()
-        };
+        // Using (sum, count) tuple instead of Vec to avoid memory issues
+        let accumulated_stone_diff_stats = (meta.total_stone_diff_sum, meta.total_games_for_stats);
 
         Ok(Self {
             patterns,
@@ -550,7 +545,7 @@ impl TrainingEngine {
             target_games: Arc::new(AtomicU64::new(meta.target_games.unwrap_or(0))),
             callback_interval: DEFAULT_CALLBACK_INTERVAL,
             // Restore accumulated statistics from checkpoint
-            accumulated_stone_diffs,
+            accumulated_stone_diff_stats,
             accumulated_wins: meta.accumulated_wins,
         })
     }
@@ -929,7 +924,8 @@ impl TrainingEngine {
             adam.timestep(),
             Some(self.target_games.load(Ordering::SeqCst)).filter(|&t| t > 0),
             self.accumulated_wins,
-            &self.accumulated_stone_diffs,
+            self.accumulated_stone_diff_stats.0,
+            self.accumulated_stone_diff_stats.1,
         );
 
         // Req 12.2: Use retry logic for checkpoint save
@@ -1165,6 +1161,40 @@ impl TrainingEngine {
         self.callback_interval
     }
 
+    /// Set the checkpoint interval.
+    ///
+    /// This allows updating the checkpoint interval after engine creation,
+    /// which is necessary when resuming training with different settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `interval` - Number of games between checkpoints
+    pub fn set_checkpoint_interval(&mut self, interval: u64) {
+        self.config.checkpoint_interval = interval;
+    }
+
+    /// Get the current checkpoint interval.
+    pub fn checkpoint_interval(&self) -> u64 {
+        self.config.checkpoint_interval
+    }
+
+    /// Set the search time per move.
+    ///
+    /// This allows updating the search time after engine creation,
+    /// which is necessary when resuming training with different settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `time_ms` - Time limit per move in milliseconds
+    pub fn set_search_time_ms(&mut self, time_ms: u64) {
+        self.config.search_time_ms = time_ms;
+    }
+
+    /// Get the current search time per move.
+    pub fn search_time_ms(&self) -> u64 {
+        self.config.search_time_ms
+    }
+
     /// Start training with a target game count and optional progress callback.
     ///
     /// This method implements the complete training loop with:
@@ -1210,7 +1240,7 @@ impl TrainingEngine {
         self.set_state(TrainingState::Training);
         self.clear_pause_flag();
 
-        // Note: Do NOT reset accumulated_stone_diffs and accumulated_wins here
+        // Note: Do NOT reset accumulated_stone_diff_stats and accumulated_wins here
         // to preserve statistics across resume sessions
 
         self.logger.log_info(&format!(
@@ -1279,8 +1309,9 @@ impl TrainingEngine {
                                 batch_stone_diffs.push(stone_diff);
                                 batch_move_counts.push(game_result.moves_played);
 
-                                // Accumulate for progress tracking
-                                self.accumulated_stone_diffs.push(stone_diff);
+                                // Accumulate for progress tracking (using sum and count)
+                                self.accumulated_stone_diff_stats.0 += stone_diff as f64;
+                                self.accumulated_stone_diff_stats.1 += 1;
                                 if stone_diff > 0.0 {
                                     self.accumulated_wins.0 += 1; // Black win
                                 } else if stone_diff < 0.0 {
@@ -1453,9 +1484,8 @@ impl TrainingEngine {
             (0.0, 0.0, 0.0)
         };
 
-        let avg_stone_diff = if !self.accumulated_stone_diffs.is_empty() {
-            self.accumulated_stone_diffs.iter().sum::<f32>() as f64
-                / self.accumulated_stone_diffs.len() as f64
+        let avg_stone_diff = if self.accumulated_stone_diff_stats.1 > 0 {
+            self.accumulated_stone_diff_stats.0 / self.accumulated_stone_diff_stats.1 as f64
         } else {
             0.0
         };
@@ -1535,9 +1565,9 @@ impl TrainingEngine {
             (0.0, 0.0, 0.0)
         };
 
-        let avg_stone_diff = if !self.accumulated_stone_diffs.is_empty() {
-            self.accumulated_stone_diffs.iter().sum::<f32>()
-                / self.accumulated_stone_diffs.len() as f32
+        let avg_stone_diff = if self.accumulated_stone_diff_stats.1 > 0 {
+            (self.accumulated_stone_diff_stats.0 / self.accumulated_stone_diff_stats.1 as f64)
+                as f32
         } else {
             0.0
         };
