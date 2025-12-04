@@ -419,82 +419,93 @@ fn test_score_conversion_valid_game_range() {
 
 // ========== Task 11.3.5: Epsilon Schedule Tests ==========
 
+const EPSILON_WARMUP_TEST: f32 = 0.12;
+const EPSILON_LINEAR_TARGET_TEST: f32 = 0.04;
+const EPSILON_FLOOR_TEST: f32 = 0.005;
+const HIGH_EXPLORATION_END_TEST: u64 = 50_000;
+const LINEAR_DECAY_END_TEST: u64 = 200_000;
+const MODERATE_EXPLORATION_END_TEST: u64 = 500_000;
+
+fn approx_eq(value: f32, target: f32) -> bool {
+    (value - target).abs() < 0.002
+}
+
 #[test]
 fn test_epsilon_schedule_phase1() {
-    // Phase 1: Games 0-299,999 -> epsilon 0.15
-
-    let epsilon = EpsilonSchedule::get(0);
     assert!(
-        (epsilon - 0.15).abs() < 0.001,
-        "Phase 1 epsilon should be 0.15, got {}",
-        epsilon
+        approx_eq(EpsilonSchedule::get(0), EPSILON_WARMUP_TEST),
+        "Initial epsilon should equal warm-up value",
     );
-
-    let epsilon_mid = EpsilonSchedule::get(150_000);
     assert!(
-        (epsilon_mid - 0.15).abs() < 0.001,
-        "Phase 1 mid epsilon should be 0.15, got {}",
-        epsilon_mid
+        approx_eq(
+            EpsilonSchedule::get(HIGH_EXPLORATION_END_TEST - 1),
+            EPSILON_WARMUP_TEST,
+        ),
+        "Final warm-up game should still be warm-up epsilon",
     );
 }
 
 #[test]
 fn test_epsilon_schedule_phase2() {
-    // Phase 2: Games 300,000-699,999 -> epsilon 0.05
-
-    let epsilon = EpsilonSchedule::get(300_000);
     assert!(
-        (epsilon - 0.05).abs() < 0.001,
-        "Phase 2 epsilon should be 0.05, got {}",
-        epsilon
+        approx_eq(
+            EpsilonSchedule::get(HIGH_EXPLORATION_END_TEST),
+            EPSILON_WARMUP_TEST
+        ),
+        "Linear decay begins at warm-up epsilon",
     );
-
-    let epsilon_mid = EpsilonSchedule::get(500_000);
     assert!(
-        (epsilon_mid - 0.05).abs() < 0.001,
-        "Phase 2 mid epsilon should be 0.05, got {}",
-        epsilon_mid
+        approx_eq(
+            EpsilonSchedule::get(LINEAR_DECAY_END_TEST - 1),
+            EPSILON_LINEAR_TARGET_TEST,
+        ),
+        "Linear decay reaches target epsilon",
     );
 }
 
 #[test]
 fn test_epsilon_schedule_phase3() {
-    // Phase 3: Games 700,000+ -> epsilon 0.0
-
-    let epsilon = EpsilonSchedule::get(700_000);
+    let mid_value =
+        EpsilonSchedule::get((LINEAR_DECAY_END_TEST + MODERATE_EXPLORATION_END_TEST) / 2);
     assert!(
-        epsilon.abs() < 0.001,
-        "Phase 3 epsilon should be 0.0, got {}",
-        epsilon
+        mid_value > EPSILON_FLOOR_TEST,
+        "Annealing phase stays above floor",
     );
-
-    let epsilon_end = EpsilonSchedule::get(1_000_000);
     assert!(
-        epsilon_end.abs() < 0.001,
-        "End epsilon should be 0.0, got {}",
-        epsilon_end
+        mid_value < EPSILON_LINEAR_TARGET_TEST,
+        "Annealing phase moves below linear target",
+    );
+    assert!(
+        EpsilonSchedule::get(MODERATE_EXPLORATION_END_TEST - 1) >= EPSILON_FLOOR_TEST,
+        "End of annealing should still be above floor",
+    );
+}
+
+#[test]
+fn test_epsilon_schedule_phase4() {
+    assert!(
+        approx_eq(EpsilonSchedule::get(MODERATE_EXPLORATION_END_TEST), 0.0),
+        "Exploitation starts at zero",
+    );
+    assert!(
+        approx_eq(EpsilonSchedule::get(1_000_000), 0.0),
+        "Epsilon stays zero at large game counts",
     );
 }
 
 #[test]
 fn test_epsilon_schedule_monotonic_decrease() {
-    // Epsilon should decrease (or stay same) as game count increases
-
     let epsilon1 = EpsilonSchedule::get(0);
-    let epsilon2 = EpsilonSchedule::get(300_000);
-    let epsilon3 = EpsilonSchedule::get(700_000);
+    let epsilon2 = EpsilonSchedule::get(LINEAR_DECAY_END_TEST);
+    let epsilon3 = EpsilonSchedule::get(MODERATE_EXPLORATION_END_TEST);
 
     assert!(
         epsilon1 >= epsilon2,
-        "Epsilon should decrease: {} >= {}",
-        epsilon1,
-        epsilon2
+        "Epsilon should decrease from warm-up to linear target",
     );
     assert!(
         epsilon2 >= epsilon3,
-        "Epsilon should decrease: {} >= {}",
-        epsilon2,
-        epsilon3
+        "Epsilon should decrease to exploitation",
     );
 }
 
@@ -644,7 +655,7 @@ fn test_algorithm_correctness_summary() {
 
     // Epsilon schedule
     let eps = EpsilonSchedule::get(0);
-    assert!((eps - 0.15).abs() < 0.001);
+    assert!(approx_eq(eps, EPSILON_WARMUP_TEST));
     println!("  Epsilon schedule - PASS");
 
     // Req 10.6: Convergence monitor

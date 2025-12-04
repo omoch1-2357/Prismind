@@ -2083,9 +2083,10 @@ mod tests {
     #[test]
     fn test_epsilon_schedule_integration() {
         // Verify EpsilonSchedule works correctly
-        assert_eq!(EpsilonSchedule::get(0), 0.15);
-        assert_eq!(EpsilonSchedule::get(300_000), 0.05);
-        assert_eq!(EpsilonSchedule::get(700_000), 0.0);
+        assert!((EpsilonSchedule::get(0) - 0.12).abs() < 1e-6);
+        assert!(EpsilonSchedule::get(250_000) <= 0.04 + 1e-6);
+        assert!(EpsilonSchedule::get(250_000) >= 0.0);
+        assert!((EpsilonSchedule::get(500_000) - 0.0).abs() < 1e-6);
     }
 
     // ========== Task 8.1: Logging Interval Tests ==========
@@ -2719,10 +2720,10 @@ mod tests {
 
         // Req 1.5: Epsilon schedule maintained
         use crate::learning::self_play::EpsilonSchedule;
-        assert_eq!(EpsilonSchedule::get(0), 0.15);
-        assert_eq!(EpsilonSchedule::get(300_000), 0.05);
-        assert_eq!(EpsilonSchedule::get(700_000), 0.0);
-        println!("  1.5: Epsilon schedule per design (0.15->0.05->0.0)");
+        assert!((EpsilonSchedule::get(0) - 0.12).abs() < 1e-6);
+        assert!(EpsilonSchedule::get(200_000) <= 0.04 + 1e-6);
+        assert!((EpsilonSchedule::get(500_000) - 0.0).abs() < 1e-6);
+        println!("  1.5: Epsilon schedule follows warm-up→anneal→exploitation");
 
         // Req 1.6: get_statistics method
         println!("  1.6: get_statistics() returns TrainingProgress");

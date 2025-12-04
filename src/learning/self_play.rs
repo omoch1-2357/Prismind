@@ -390,15 +390,24 @@ mod tests {
     fn test_epsilon_boundary_transitions() {
         assert!(approx_eq(
             EpsilonSchedule::get(HIGH_EXPLORATION_END - 1),
-            EpsilonSchedule::get(HIGH_EXPLORATION_END)
+            EPSILON_WARMUP
+        ));
+        assert!(approx_eq(
+            EpsilonSchedule::get(HIGH_EXPLORATION_END),
+            EPSILON_WARMUP
         ));
         assert!(approx_eq(
             EpsilonSchedule::get(LINEAR_DECAY_END - 1),
-            EpsilonSchedule::get(LINEAR_DECAY_END)
+            EPSILON_LINEAR_TARGET
         ));
         assert!(approx_eq(
-            EpsilonSchedule::get(MODERATE_EXPLORATION_END - 1).max(EPSILON_MINIMUM),
-            EpsilonSchedule::get(MODERATE_EXPLORATION_END)
+            EpsilonSchedule::get(LINEAR_DECAY_END),
+            EPSILON_LINEAR_TARGET
+        ));
+        assert!(EpsilonSchedule::get(MODERATE_EXPLORATION_END - 1) >= EPSILON_FLOOR);
+        assert!(approx_eq(
+            EpsilonSchedule::get(MODERATE_EXPLORATION_END),
+            EPSILON_MINIMUM
         ));
     }
 

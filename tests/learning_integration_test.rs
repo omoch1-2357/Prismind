@@ -64,11 +64,11 @@ fn test_single_self_play_game_completion() {
     let mut search = Search::new(evaluator, 128).expect("Failed to create search");
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-    // Play a single game with epsilon=0.15 (high exploration phase)
+    // Play a single game with epsilon=0.12 (warm-up high exploration)
     let result = play_game(
         &mut search,
         &patterns,
-        0.15,
+        0.12,
         15,
         &mut rng,
         StartingPlayer::Black,
@@ -125,7 +125,7 @@ fn test_self_play_game_produces_valid_history() {
     let result = play_game(
         &mut search,
         &patterns,
-        0.15,
+        0.12,
         15,
         &mut rng,
         StartingPlayer::Black,
@@ -176,7 +176,7 @@ fn test_td_update_produces_weight_changes() {
     let result = play_game(
         &mut search,
         &patterns,
-        0.15,
+        0.12,
         15,
         &mut rng,
         StartingPlayer::Black,
@@ -226,7 +226,7 @@ fn test_td_update_direction_matches_outcome() {
     let result = play_game(
         &mut search,
         &patterns,
-        0.15,
+        0.12,
         15,
         &mut rng,
         StartingPlayer::Black,
@@ -499,7 +499,7 @@ fn test_phase2_search_api_integration() {
     let result = play_game(
         &mut search,
         &patterns,
-        0.15,
+        0.12,
         DEFAULT_SEARCH_TIME_MS,
         &mut rng,
         StartingPlayer::Black,
@@ -528,7 +528,7 @@ fn test_search_integration_returns_valid_moves() {
     let result = play_game(
         &mut search,
         &patterns,
-        0.15,
+        0.12,
         15,
         &mut rng,
         StartingPlayer::Black,
@@ -547,77 +547,85 @@ fn test_search_integration_returns_valid_moves() {
 
 // ========== Task 11.2.6: Epsilon Schedule Transition Tests ==========
 
+const EPSILON_WARMUP_TEST: f32 = 0.12;
+const EPSILON_LINEAR_TARGET_TEST: f32 = 0.04;
+const EPSILON_FLOOR_TEST: f32 = 0.005;
+const HIGH_EXPLORATION_END_TEST: u64 = 50_000;
+const LINEAR_DECAY_END_TEST: u64 = 200_000;
+const MODERATE_EXPLORATION_END_TEST: u64 = 500_000;
+
+fn approx_eq(value: f32, target: f32) -> bool {
+    (value - target).abs() < 0.002
+}
+
 #[test]
 fn test_epsilon_schedule_transitions() {
-    // Test epsilon schedule returns correct values for each phase
+    // Test epsilon schedule returns correct shapes for each phase
 
-    // Phase 1: Games 0-299,999 -> epsilon 0.15
     assert!(
-        (EpsilonSchedule::get(0) - 0.15).abs() < 0.001,
-        "Game 0 should have epsilon 0.15"
+        approx_eq(EpsilonSchedule::get(0), EPSILON_WARMUP_TEST),
+        "Game 0 should stay at warm-up epsilon"
     );
     assert!(
-        (EpsilonSchedule::get(150_000) - 0.15).abs() < 0.001,
-        "Game 150,000 should have epsilon 0.15"
-    );
-    assert!(
-        (EpsilonSchedule::get(299_999) - 0.15).abs() < 0.001,
-        "Game 299,999 should have epsilon 0.15"
+        approx_eq(
+            EpsilonSchedule::get(HIGH_EXPLORATION_END_TEST - 1),
+            EPSILON_WARMUP_TEST,
+        ),
+        "Last warm-up game should still be the warm-up epsilon"
     );
 
-    // Phase 2: Games 300,000-699,999 -> epsilon 0.05
     assert!(
-        (EpsilonSchedule::get(300_000) - 0.05).abs() < 0.001,
-        "Game 300,000 should have epsilon 0.05"
+        approx_eq(
+            EpsilonSchedule::get(HIGH_EXPLORATION_END_TEST),
+            EPSILON_WARMUP_TEST
+        ),
+        "Linear decay starts at the warm-up epsilon"
     );
     assert!(
-        (EpsilonSchedule::get(500_000) - 0.05).abs() < 0.001,
-        "Game 500,000 should have epsilon 0.05"
-    );
-    assert!(
-        (EpsilonSchedule::get(699_999) - 0.05).abs() < 0.001,
-        "Game 699,999 should have epsilon 0.05"
+        approx_eq(
+            EpsilonSchedule::get(LINEAR_DECAY_END_TEST - 1),
+            EPSILON_LINEAR_TARGET_TEST,
+        ),
+        "Linear decay ends at the target epsilon"
     );
 
-    // Phase 3: Games 700,000+ -> epsilon 0.0
+    let anneal_mid = (LINEAR_DECAY_END_TEST + MODERATE_EXPLORATION_END_TEST) / 2;
+    let mid_value = EpsilonSchedule::get(anneal_mid);
     assert!(
-        (EpsilonSchedule::get(700_000) - 0.0).abs() < 0.001,
-        "Game 700,000 should have epsilon 0.0"
+        mid_value > EPSILON_FLOOR_TEST,
+        "Exponential phase should stay above the floor"
     );
     assert!(
-        (EpsilonSchedule::get(850_000) - 0.0).abs() < 0.001,
-        "Game 850,000 should have epsilon 0.0"
+        mid_value < EPSILON_LINEAR_TARGET_TEST,
+        "Exponential phase should be below the linear target"
+    );
+
+    assert!(
+        EpsilonSchedule::get(MODERATE_EXPLORATION_END_TEST - 1) >= EPSILON_FLOOR_TEST,
+        "End of annealing should still be above floor"
     );
     assert!(
-        (EpsilonSchedule::get(999_999) - 0.0).abs() < 0.001,
-        "Game 999,999 should have epsilon 0.0"
+        approx_eq(EpsilonSchedule::get(MODERATE_EXPLORATION_END_TEST), 0.0),
+        "Cut over to exploitation (epsilon 0)"
+    );
+    assert!(
+        approx_eq(EpsilonSchedule::get(1_000_000), 0.0),
+        "Later games stay at epsilon 0"
     );
 }
 
 #[test]
 fn test_epsilon_schedule_boundary_transitions() {
-    // Test exact boundary transitions
-
-    // Transition at 300,000
-    let before = EpsilonSchedule::get(299_999);
-    let after = EpsilonSchedule::get(300_000);
+    let before = EpsilonSchedule::get(MODERATE_EXPLORATION_END_TEST - 1);
+    let after = EpsilonSchedule::get(MODERATE_EXPLORATION_END_TEST);
     assert!(
-        (before - 0.15).abs() < 0.001,
-        "Before boundary should be 0.15"
+        before >= EPSILON_FLOOR_TEST,
+        "Before exploitation boundary should be above floor"
     );
     assert!(
-        (after - 0.05).abs() < 0.001,
-        "After boundary should be 0.05"
+        approx_eq(after, 0.0),
+        "Exploitation boundary should hit zero"
     );
-
-    // Transition at 700,000
-    let before = EpsilonSchedule::get(699_999);
-    let after = EpsilonSchedule::get(700_000);
-    assert!(
-        (before - 0.05).abs() < 0.001,
-        "Before boundary should be 0.05"
-    );
-    assert!((after - 0.0).abs() < 0.001, "After boundary should be 0.0");
 }
 
 // ========== Requirements Summary ==========
@@ -637,7 +645,7 @@ fn test_integration_requirements_summary() {
     let result = play_game(
         &mut search,
         &patterns,
-        0.15,
+        0.12,
         15,
         &mut rng,
         StartingPlayer::Black,
@@ -677,7 +685,7 @@ fn test_integration_requirements_summary() {
     println!("  9.1: Phase 2 integration with shared evaluator - PASS");
 
     // Epsilon schedule
-    assert!((EpsilonSchedule::get(0) - 0.15).abs() < 0.001);
+    assert!(approx_eq(EpsilonSchedule::get(0), EPSILON_WARMUP_TEST));
     println!("  Epsilon schedule transitions - PASS");
 
     println!("=== All integration requirements verified ===");
