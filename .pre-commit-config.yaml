@@ -47,6 +47,13 @@ repos:
         files: \.rs$
         pass_filenames: false
 
+      - id: rustdoc-check
+        name: rustdoc check
+        entry: cargo doc --workspace --no-deps --document-private-items
+        language: system
+        pass_filenames: false
+        always_run: true
+
   # Forbid lint/type-check bypass patterns
   # See docs/bypass-policy.md for approved exceptions
   - repo: local

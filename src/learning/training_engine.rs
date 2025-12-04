@@ -30,6 +30,7 @@
 //! - Req 12.7: Graceful shutdown on SIGINT/SIGTERM
 //! - Req 8.7: Reduce TT size on memory allocation failure
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -875,18 +876,25 @@ impl TrainingEngine {
 
     /// Play a single self-play game.
     ///
-    /// Creates a thread-local search instance with a copy of the current
-    /// evaluation table weights. This allows parallel game execution
-    /// while maintaining consistency within each game.
+    /// Uses a thread-local search instance that persists across games.
+    /// Only the evaluator weights are updated between games, while the
+    /// transposition table is reused (with age increment for soft reset).
+    /// This eliminates the 128MB TT allocation overhead per game.
     ///
     /// # Requirements
     ///
     /// - Req 8.7: Reduce TT size on memory allocation failure
+    /// - Req 13.2: Achieve high throughput via Search reuse
     fn play_single_game(
         &self,
         epsilon: f32,
         starting_player: StartingPlayer,
     ) -> Result<GameResult, LearningError> {
+        // Thread-local Search pool: one Search instance per thread, reused across games
+        thread_local! {
+            static THREAD_SEARCH: RefCell<Option<Search>> = const { RefCell::new(None) };
+        }
+
         // Acquire read lock to get a snapshot of the evaluation table
         let table = self.eval_table.read().expect("RwLock poisoned");
 
@@ -896,31 +904,49 @@ impl TrainingEngine {
         // Release the read lock before search
         drop(table);
 
-        // Create Search instance with TT size fallback on memory error
-        // Req 8.7: Reduce TT size and retry on memory allocation failure
-        let mut tt_size = self.config.tt_size_mb;
-        let mut search = loop {
-            match Search::new(evaluator.clone(), tt_size) {
-                Ok(s) => break s,
-                Err(_) if tt_size > MIN_TT_SIZE_MB => {
-                    tt_size /= 2;
-                    continue;
+        let patterns = &self.patterns;
+        let search_time_ms = self.config.search_time_ms;
+        let tt_size_mb = self.config.tt_size_mb;
+
+        THREAD_SEARCH.with(|cell| {
+            let mut search_opt = cell.borrow_mut();
+
+            // Initialize Search once per thread, reuse thereafter
+            if search_opt.is_none() {
+                // First game on this thread: create Search with TT size fallback
+                // Req 8.7: Reduce TT size and retry on memory allocation failure
+                let mut tt_size = tt_size_mb;
+                loop {
+                    match Search::new(evaluator.clone(), tt_size) {
+                        Ok(s) => {
+                            *search_opt = Some(s);
+                            break;
+                        }
+                        Err(_) if tt_size > MIN_TT_SIZE_MB => {
+                            tt_size /= 2;
+                            continue;
+                        }
+                        Err(e) => return Err(LearningError::Search(e)),
+                    }
                 }
-                Err(e) => return Err(LearningError::Search(e)),
+            } else {
+                // Reuse existing Search: update evaluator and soft-reset TT
+                search_opt.as_mut().unwrap().update_evaluator(evaluator);
             }
-        };
 
-        let mut rng = rand::rng();
+            let search = search_opt.as_mut().unwrap();
+            let mut rng = rand::rng();
 
-        // Play game using the self-play engine
-        play_game(
-            &mut search,
-            &self.patterns,
-            epsilon,
-            self.config.search_time_ms,
-            &mut rng,
-            starting_player,
-        )
+            // Play game using the self-play engine
+            play_game(
+                search,
+                patterns,
+                epsilon,
+                search_time_ms,
+                &mut rng,
+                starting_player,
+            )
+        })
     }
 
     fn run_eval_sample(&self, games: u64) -> Result<EvalLogEntry, LearningError> {

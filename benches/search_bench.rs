@@ -56,12 +56,6 @@ fn bench_pruning_efficiency(c: &mut Criterion) {
                 .search(black_box(&board), black_box(1000), None)
                 .expect("Search failed");
 
-            // 探索ノード数をログ出力
-            println!(
-                "Nodes searched at depth {}: {}",
-                result.depth, result.nodes_searched
-            );
-
             black_box(result)
         });
     });
@@ -81,19 +75,6 @@ fn bench_nodes_per_second(c: &mut Criterion) {
             let result = search
                 .search(black_box(&board), black_box(100), None)
                 .expect("Search failed");
-
-            // npsを計算
-            let nps = if result.elapsed_ms > 0 {
-                (result.nodes_searched as f64) / (result.elapsed_ms as f64 / 1000.0)
-            } else {
-                0.0
-            };
-
-            println!(
-                "Nodes per second: {:.0}, Total nodes: {}, Time: {}ms",
-                nps, result.nodes_searched, result.elapsed_ms
-            );
-
             black_box(result)
         });
     });

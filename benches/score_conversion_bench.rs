@@ -101,7 +101,6 @@ fn bench_u16_to_score_simd_x86_64(c: &mut Criterion) {
 #[cfg(target_arch = "x86_64")]
 fn bench_u16_to_score_simd_sse(c: &mut Criterion) {
     if !is_x86_feature_detected!("sse4.1") {
-        println!("SSE4.1 not available, skipping SSE benchmark");
         return;
     }
     c.bench_function("u16_to_score_simd_sse", |b| {
@@ -114,7 +113,6 @@ fn bench_u16_to_score_simd_sse(c: &mut Criterion) {
 #[cfg(target_arch = "x86_64")]
 fn bench_u16_to_score_simd_avx2(c: &mut Criterion) {
     if !is_x86_feature_detected!("avx2") {
-        println!("AVX2 not available, skipping AVX2 benchmark");
         return;
     }
     c.bench_function("u16_to_score_simd_avx2", |b| {

@@ -1571,6 +1571,42 @@ impl Search {
     pub fn evaluate_static(&self, board: &BitBoard) -> f32 {
         self.evaluator.evaluate(board)
     }
+
+    /// Update the evaluator while keeping the transposition table.
+    ///
+    /// This method allows reusing a Search instance across multiple games
+    /// by updating only the evaluator (with fresh weights from training).
+    /// The transposition table is soft-reset via `increment_age()` to ensure
+    /// stale entries from the previous evaluator are not incorrectly reused.
+    ///
+    /// # Arguments
+    ///
+    /// * `evaluator` - New evaluator with updated weights
+    ///
+    /// # Performance
+    ///
+    /// This is much faster than creating a new Search instance because:
+    /// - No TT memory allocation (128-256MB)
+    /// - Only updates the evaluator reference and increments age counter
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use prismind::evaluator::Evaluator;
+    /// use prismind::search::Search;
+    ///
+    /// let evaluator = Evaluator::new("patterns.csv").unwrap();
+    /// let mut search = Search::new(evaluator, 128).unwrap();
+    ///
+    /// // After training updates weights...
+    /// let updated_evaluator = Evaluator::new("patterns.csv").unwrap();
+    /// search.update_evaluator(updated_evaluator);
+    /// ```
+    #[inline]
+    pub fn update_evaluator(&mut self, evaluator: Evaluator) {
+        self.transposition_table.increment_age();
+        self.evaluator = evaluator;
+    }
 }
 
 #[cfg(test)]
