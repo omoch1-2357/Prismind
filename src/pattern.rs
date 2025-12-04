@@ -40,10 +40,10 @@ pub enum PatternError {
 ///
 /// - `id`: パターンID（0-13、P01-P14に対応）
 /// - `k`: セル数（パターンに含まれるマスの数）
-/// - `_padding`: アライメント調整用パディング
 /// - `positions`: セル位置の配列（最大10個、0-63の範囲）
+/// - `rotated_positions`: 4方向の回転済み位置（事前計算）
 ///
-/// 総サイズ: 24バイト（スタック配置）
+/// 事前計算により、パターン抽出時の回転計算オーバーヘッドを削減。
 #[repr(C, align(8))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pattern {
@@ -51,10 +51,11 @@ pub struct Pattern {
     pub id: u8,
     /// セル数（パターンに含まれるマスの数）
     pub k: u8,
-    /// アライメント調整用パディング
-    _padding: [u8; 6],
     /// セル位置の配列（最大10個、0-63の範囲）
     pub positions: [u8; 10],
+    /// 4方向の回転済み位置（事前計算）
+    /// rotated_positions\[rotation\]\[position_idx\]
+    pub rotated_positions: [[u8; 10]; 4],
 }
 
 /// CSV読み込み用の中間構造体
@@ -91,12 +92,46 @@ impl Pattern {
             pos_array[i] = pos;
         }
 
+        // 4方向の回転済み位置を事前計算
+        let mut rotated_positions = [[0u8; 10]; 4];
+        let len = k as usize;
+        for (rotation, rotated) in rotated_positions.iter_mut().enumerate() {
+            for (i, &pos) in pos_array.iter().enumerate().take(len) {
+                rotated[i] = compute_rotated_position(pos, rotation);
+            }
+        }
+
         Ok(Self {
             id,
             k,
-            _padding: [0; 6],
             positions: pos_array,
+            rotated_positions,
         })
+    }
+}
+
+/// 回転後の位置を計算（内部関数）
+#[inline]
+fn compute_rotated_position(pos: u8, rotation: usize) -> u8 {
+    match rotation {
+        0 => pos,
+        1 => {
+            // 90度時計回り
+            let row = pos / 8;
+            let col = pos % 8;
+            (7 - col) * 8 + row
+        }
+        2 => {
+            // 180度
+            63 - pos
+        }
+        3 => {
+            // 270度時計回り（90度反時計回り）
+            let row = pos / 8;
+            let col = pos % 8;
+            col * 8 + (7 - row)
+        }
+        _ => pos,
     }
 }
 
@@ -265,60 +300,6 @@ pub fn extract_index(black: u64, white: u64, pattern: &Pattern, swap_colors: boo
     )
 }
 
-/// 4方向の回転で全パターンを抽出
-///
-/// 与えられた盤面を4方向（0°, 90°, 180°, 270°）に回転し、
-/// 各回転方向について14パターンのインデックスを抽出する。
-/// 合計56個のインデックスを返す。
-///
-/// # アルゴリズム
-///
-/// 1. 0°回転（元の盤面）: swap_colors=false で14パターン抽出
-/// 2. 90°回転: swap_colors=true で14パターン抽出
-/// 3. 180°回転: swap_colors=false で14パターン抽出
-/// 4. 270°回転: swap_colors=true で14パターン抽出
-///
-/// # swap_colorsの数学的根拠
-///
-/// 90°/270°回転時にswap_colors=trueとするのは、
-/// 正方形の対称性を記述するDihedral Group D4の数学的性質による。
-/// 90°回転は主対角線に関する鏡映と中心反転の合成であり、
-/// この変換により黒石と白石の役割が入れ替わる。
-///
-#[inline]
-fn rotate_pos_cw_90(pos: u8) -> u8 {
-    let row = pos / 8;
-    let col = pos % 8;
-    let new_row = 7 - col;
-    let new_col = row;
-    new_row * 8 + new_col
-}
-
-#[inline]
-fn rotate_pos_ccw_90(pos: u8) -> u8 {
-    let row = pos / 8;
-    let col = pos % 8;
-    let new_row = col;
-    let new_col = 7 - row;
-    new_row * 8 + new_col
-}
-
-#[inline]
-fn rotate_pos_180(pos: u8) -> u8 {
-    63 - pos
-}
-
-#[inline]
-fn map_position_for_rotation(pos: u8, rotation: usize) -> u8 {
-    match rotation {
-        0 => pos,
-        1 => rotate_pos_cw_90(pos),
-        2 => rotate_pos_180(pos),
-        3 => rotate_pos_ccw_90(pos),
-        _ => unreachable!("rotation must be 0..3"),
-    }
-}
-
 /// # Arguments
 ///
 /// * `board` - 盤面状態（BitBoard）
@@ -366,6 +347,9 @@ pub fn extract_all_patterns(board: &crate::board::BitBoard, patterns: &[Pattern]
 }
 
 /// 可変バッファにパターンインデックスを書き込む
+///
+/// 事前計算済みの回転位置を使用して高速化。
+#[inline]
 pub fn extract_all_patterns_into(
     board: &crate::board::BitBoard,
     patterns: &[Pattern],
@@ -377,21 +361,60 @@ pub fn extract_all_patterns_into(
     let black = board.black;
     let white = board.white_mask();
 
+    // 各回転について処理（事前計算済み位置を使用）
     for rotation in 0..4 {
         let swap_colors = rotation % 2 == 1;
+        let base_idx = rotation * 14;
+
         for (pattern_idx, pattern) in patterns.iter().enumerate() {
             let len = pattern.k as usize;
-            let mut rotated_positions = [0u8; 10];
-            for (i, pos) in pattern.positions.iter().enumerate().take(len) {
-                rotated_positions[i] = map_position_for_rotation(*pos, rotation);
-            }
+            // 事前計算済みの回転位置を直接使用
+            let rotated_positions = &pattern.rotated_positions[rotation];
 
             let index =
-                extract_index_with_positions(black, white, &rotated_positions, len, swap_colors);
+                extract_index_with_positions_ref(black, white, rotated_positions, len, swap_colors);
 
-            out[rotation * 14 + pattern_idx] = index;
+            out[base_idx + pattern_idx] = index;
         }
     }
+}
+
+/// 参照版のインデックス抽出（コピーなし）
+#[inline]
+fn extract_index_with_positions_ref(
+    black: u64,
+    white: u64,
+    positions: &[u8; 10],
+    len: usize,
+    swap_colors: bool,
+) -> usize {
+    let mut index = 0usize;
+    let mut power_of_3 = 1usize;
+
+    // swap_colorsフラグを整数値に変換（ブランチレス）
+    let swap = swap_colors as u8;
+
+    for pos in positions.iter().take(len) {
+        let bit = 1u64 << pos;
+
+        // 各セルの石の状態を取得（ブランチレス）
+        let is_black = ((black & bit) >> pos) as u8;
+        let is_white = ((white & bit) >> pos) as u8;
+
+        // 3進数の値を計算（ブランチレス）
+        // swap=false: black=1, white=2
+        // swap=true:  black=2, white=1
+        let black_value = 1 + swap;
+        let white_value = 2 - swap;
+
+        let cell_value = (is_black * black_value + is_white * white_value) as usize;
+
+        // 3進数インデックスに累積
+        index += cell_value * power_of_3;
+        power_of_3 *= 3;
+    }
+
+    index
 }
 
 /// patterns.csvからパターン定義を読み込む
@@ -508,11 +531,12 @@ mod tests {
 
     #[test]
     fn test_pattern_struct_size() {
-        // Pattern構造体のサイズが24バイト以内であることを確認
+        // Pattern構造体のサイズを確認
+        // 回転済み位置のプリコンピュートにより56バイトに増加（速度向上とのトレードオフ）
         assert_eq!(
             std::mem::size_of::<Pattern>(),
-            24,
-            "Pattern should be exactly 24 bytes"
+            56,
+            "Pattern should be exactly 56 bytes (with precomputed rotations)"
         );
     }
 
@@ -803,8 +827,9 @@ P13,4,A1 B1 C1 D1
         println!("✓ 6.4: Coordinate to bit position conversion works");
 
         // Requirement 6.6: 固定長配列でヒープアロケーション回避
-        assert_eq!(std::mem::size_of::<Pattern>(), 24);
-        println!("✓ 6.6 & 13.6: Fixed-size array, no heap allocation");
+        // 回転済み位置のプリコンピュートにより56バイトに増加
+        assert_eq!(std::mem::size_of::<Pattern>(), 56);
+        println!("✓ 6.6 & 13.6: Fixed-size array with precomputed rotations, no heap allocation");
 
         println!("=== All Task 5.1 requirements verified ===");
     }

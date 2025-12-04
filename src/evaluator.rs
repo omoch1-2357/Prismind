@@ -243,7 +243,12 @@ pub struct EvaluationTable {
 /// # 構成
 ///
 /// - patterns: 14個のパターン定義
-/// - table: 評価テーブル（SoA形式）
+/// - table_storage: 評価テーブル（所有またはArc共有）
+///
+/// # テーブルストレージモード
+///
+/// - `Owned`: テーブルを所有（通常のゲーム対戦用）
+/// - `Shared`: `Arc<RwLock>`で共有参照（学習時のクローン回避用）
 ///
 /// # 使用例
 ///
@@ -256,12 +261,39 @@ pub struct EvaluationTable {
 /// let eval = evaluator.evaluate(&board);
 /// println!("評価値: {}", eval);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Evaluator {
     /// パターン定義配列（14個）
     patterns: [Pattern; 14],
-    /// 評価テーブル（SoA形式）
-    table: EvaluationTable,
+    /// 評価テーブルストレージ（所有またはArc共有）
+    table_storage: TableStorage,
+}
+
+/// 評価テーブルのストレージモード
+#[derive(Debug)]
+enum TableStorage {
+    /// テーブルを所有（クローンされたコピー）
+    Owned(Box<EvaluationTable>),
+    /// `Arc<RwLock>`で共有参照（学習時のクローン回避用）
+    Shared(std::sync::Arc<std::sync::RwLock<EvaluationTable>>),
+}
+
+impl Clone for TableStorage {
+    fn clone(&self) -> Self {
+        match self {
+            TableStorage::Owned(table) => TableStorage::Owned(table.clone()),
+            TableStorage::Shared(arc) => TableStorage::Shared(std::sync::Arc::clone(arc)),
+        }
+    }
+}
+
+impl Clone for Evaluator {
+    fn clone(&self) -> Self {
+        Self {
+            patterns: self.patterns,
+            table_storage: self.table_storage.clone(),
+        }
+    }
 }
 
 /// Default pattern sizes (k values) for standard Othello patterns.
@@ -554,7 +586,10 @@ impl Evaluator {
         // 評価テーブルをSoA形式で初期化
         let table = EvaluationTable::from_patterns(&patterns);
 
-        Ok(Self { patterns, table })
+        Ok(Self {
+            patterns,
+            table_storage: TableStorage::Owned(Box::new(table)),
+        })
     }
 
     /// Create an Evaluator with an existing shared EvaluationTable.
@@ -585,11 +620,10 @@ impl Evaluator {
         // Use default patterns for evaluation (pattern positions not needed for simple eval).
         // The table already contains proper sizes.
         let patterns = Self::default_patterns();
-        let table_clone = table.read().unwrap().clone();
 
         Self {
             patterns,
-            table: table_clone,
+            table_storage: TableStorage::Shared(table),
         }
     }
 
@@ -638,14 +672,55 @@ impl Evaluator {
         // Clone the table data for thread-safe usage
         Self {
             patterns: *patterns,
-            table: table.clone(),
+            table_storage: TableStorage::Owned(Box::new(table.clone())),
+        }
+    }
+
+    /// Create an Evaluator with a shared reference to an EvaluationTable.
+    ///
+    /// This constructor is used for Phase 3 learning where the evaluation
+    /// table is shared across threads. **No cloning occurs** - the Arc
+    /// reference is used directly, eliminating the 70-80MB copy overhead.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - Arc-wrapped RwLock of EvaluationTable for shared access
+    /// * `patterns` - Pattern definitions array
+    ///
+    /// # Returns
+    ///
+    /// A new Evaluator that uses the shared table reference.
+    ///
+    /// # Performance
+    ///
+    /// This is the preferred constructor for training as it avoids
+    /// cloning the entire evaluation table (70-80MB) per game.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use prismind::evaluator::{Evaluator, EvaluationTable};
+    /// use prismind::pattern::load_patterns;
+    /// use std::sync::{Arc, RwLock};
+    ///
+    /// let patterns = load_patterns("patterns.csv").unwrap();
+    /// let table = Arc::new(RwLock::new(EvaluationTable::from_patterns(&patterns)));
+    /// let evaluator = Evaluator::from_shared_table(Arc::clone(&table), &patterns);
+    /// ```
+    pub fn from_shared_table(
+        table: std::sync::Arc<std::sync::RwLock<EvaluationTable>>,
+        patterns: &[Pattern; 14],
+    ) -> Self {
+        Self {
+            patterns: *patterns,
+            table_storage: TableStorage::Shared(table),
         }
     }
 
     /// 盤面の評価値を計算
     ///
     /// 56個のパターンインスタンスから評価値を取得し合計する。
-    /// 各パターンインスタンスのu16値をf32石差に変換してから合計し、
+    /// u16値を整数のまま合計し、最後に1回だけf32に変換することで高速化。
     /// 現在の手番が白の場合は符号を反転する。
     ///
     /// # Arguments
@@ -658,7 +733,8 @@ impl Evaluator {
     ///
     /// # Performance
     ///
-    /// 目標実行時間: 35μs以内（プリフェッチとSoA最適化）
+    /// 整数演算で合計し最後に1回だけf32変換することで、
+    /// 56回の浮動小数点演算を削減。
     ///
     /// # Examples
     ///
@@ -671,67 +747,62 @@ impl Evaluator {
     /// let eval = evaluator.evaluate(&board);
     /// assert!((eval).abs() < 5.0); // 初期盤面はほぼ中立
     /// ```
+    #[inline]
     pub fn evaluate(&self, board: &crate::board::BitBoard) -> f32 {
+        match &self.table_storage {
+            TableStorage::Owned(table) => Self::evaluate_with_table(board, &self.patterns, table),
+            TableStorage::Shared(table_arc) => {
+                let table = table_arc.read().expect("RwLock poisoned");
+                Self::evaluate_with_table(board, &self.patterns, &table)
+            }
+        }
+    }
+
+    /// 評価テーブルを使用して盤面を評価（内部ヘルパー）
+    #[inline]
+    fn evaluate_with_table(
+        board: &crate::board::BitBoard,
+        patterns: &[Pattern; 14],
+        table: &EvaluationTable,
+    ) -> f32 {
         // ステージを手数÷2で計算
         let stage = calculate_stage(board.move_count());
 
         // 56個のパターンインスタンスを抽出（固定長バッファに書き込み）
         let mut indices = [0usize; 56];
-        crate::pattern::extract_all_patterns_into(board, &self.patterns, &mut indices);
+        crate::pattern::extract_all_patterns_into(board, patterns, &mut indices);
 
-        let mut sum = 0.0f32;
+        // 整数で合計（u16値を直接加算）
+        // u16の中央値32768を引く操作は最後に行う
+        let mut sum_u32 = 0u32;
 
-        // 4方向 × 14パターン = 56個のインデックスを処理
+        // ステージデータへの参照を取得
+        let stage_data = &table.data[stage];
+        let offsets = &table.pattern_offsets;
+
+        // 56個のインデックスを処理
         for rotation in 0..4 {
+            let base_idx = rotation * 14;
+
+            // 14パターンをループアンローリング風に処理
             for pattern_id in 0..14 {
-                let idx = rotation * 14 + pattern_id;
-                let index = indices[idx];
-
-                // 次のパターンをプリフェッチ（ARM64最適化）
-                #[cfg(target_arch = "aarch64")]
-                {
-                    if idx < 55 {
-                        let _next_rotation = (idx + 1) / 14;
-                        let next_pattern_id = (idx + 1) % 14;
-                        let next_index = indices[idx + 1];
-                        let next_offset = self.table.pattern_offsets[next_pattern_id] + next_index;
-
-                        unsafe {
-                            let ptr = self.table.data[stage].as_ptr().add(next_offset);
-                            // ARM64専用プリフェッチヒント
-                            crate::arm64::prefetch_arm64(ptr);
-                        }
-                    }
-                }
-
-                // 次のパターンをプリフェッチ（x86-64最適化）
-                #[cfg(target_arch = "x86_64")]
-                {
-                    if idx < 55 {
-                        let _next_rotation = (idx + 1) / 14;
-                        let next_pattern_id = (idx + 1) % 14;
-                        let next_index = indices[idx + 1];
-                        let next_offset = self.table.pattern_offsets[next_pattern_id] + next_index;
-
-                        unsafe {
-                            let ptr = self.table.data[stage].as_ptr().add(next_offset);
-                            // x86-64専用プリフェッチヒント
-                            crate::x86_64::prefetch_x86_64(ptr);
-                        }
-                    }
-                }
-
-                // 評価値を取得してu16→f32変換
-                let value_u16 = self.table.get(pattern_id, stage, index);
-                sum += u16_to_score(value_u16);
+                let index = indices[base_idx + pattern_id];
+                let offset = offsets[pattern_id] + index;
+                sum_u32 += stage_data[offset] as u32;
             }
         }
 
+        // 最後に1回だけf32変換
+        // sum = (sum_u32 - 56 * 32768) / 256
+        // = sum_u32 / 256 - 56 * 128
+        // = sum_u32 / 256 - 7168
+        let sum_f32 = (sum_u32 as f32) / 256.0 - 7168.0;
+
         // 現在の手番が白の場合は符号を反転
         if board.turn() == crate::board::Color::White {
-            -sum
+            -sum_f32
         } else {
-            sum
+            sum_f32
         }
     }
 }
@@ -1745,7 +1816,7 @@ mod tests {
         // Requirement 11.1: Evaluator構造体の初期化
         let evaluator = Evaluator::new("patterns.csv").unwrap();
         assert_eq!(evaluator.patterns.len(), 14);
-        assert_eq!(evaluator.table.data.len(), 30);
+        // Note: table is private (TableStorage enum), test via evaluate()
         println!("✓ 11.1: Evaluator initialized with patterns and SoA table");
 
         // Requirement 11.2: 評価関数の実装

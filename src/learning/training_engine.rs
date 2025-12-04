@@ -396,7 +396,7 @@ pub struct TrainingEngine {
     /// Callback interval in games (default: 100).
     callback_interval: u64,
     /// Accumulated stone difference statistics: (sum, count).
-    /// Using sum and count instead of Vec<f32> to avoid memory issues on resume.
+    /// Using sum and count instead of `Vec<f32>` to avoid memory issues on resume.
     accumulated_stone_diff_stats: (f64, u64),
     /// Accumulated win counts (black, white, draw) for progress tracking.
     accumulated_wins: (u64, u64, u64),
@@ -874,12 +874,17 @@ impl TrainingEngine {
         self.get_training_stats()
     }
 
-    /// Play a single self-play game.
+    /// Play a single self-play game using thread-local Search pool.
     ///
-    /// Uses a thread-local search instance that persists across games.
+    /// Uses thread-local storage to reuse Search instances across games.
     /// Only the evaluator weights are updated between games, while the
     /// transposition table is reused (with age increment for soft reset).
     /// This eliminates the 128MB TT allocation overhead per game.
+    ///
+    /// # Performance
+    ///
+    /// Uses `Evaluator::from_shared_table()` to avoid cloning the entire
+    /// evaluation table (70-80MB) per game. The Arc reference is used directly.
     ///
     /// # Requirements
     ///
@@ -895,14 +900,11 @@ impl TrainingEngine {
             static THREAD_SEARCH: RefCell<Option<Search>> = const { RefCell::new(None) };
         }
 
-        // Acquire read lock to get a snapshot of the evaluation table
-        let table = self.eval_table.read().expect("RwLock poisoned");
-
-        // Create evaluator using a copy of the table (thread-safe)
-        let evaluator = crate::evaluator::Evaluator::from_table(&table, &self.patterns);
-
-        // Release the read lock before search
-        drop(table);
+        // Create evaluator using Arc shared reference (NO CLONE!)
+        let evaluator = crate::evaluator::Evaluator::from_shared_table(
+            std::sync::Arc::clone(&self.eval_table),
+            &self.patterns,
+        );
 
         let patterns = &self.patterns;
         let search_time_ms = self.config.search_time_ms;
