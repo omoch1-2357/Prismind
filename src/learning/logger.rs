@@ -117,6 +117,14 @@ pub struct BatchStats {
     pub elapsed_secs: f64,
     /// Games per second throughput.
     pub games_per_sec: f64,
+    /// 平均ランダム手数（黒番）
+    pub avg_random_moves_black: f32,
+    /// 平均ランダム手数（白番）
+    pub avg_random_moves_white: f32,
+    /// ランダム手率（黒番）
+    pub random_move_rate_black: f32,
+    /// ランダム手率（白番）
+    pub random_move_rate_white: f32,
 }
 
 impl BatchStats {
@@ -133,6 +141,25 @@ impl BatchStats {
         stone_diffs: &[f32],
         move_counts: &[usize],
         elapsed_secs: f64,
+    ) -> Self {
+        Self::from_games_with_random(
+            games_completed,
+            stone_diffs,
+            move_counts,
+            elapsed_secs,
+            None,
+            None,
+        )
+    }
+
+    /// Create batch stats including random move metrics.
+    pub fn from_games_with_random(
+        games_completed: u64,
+        stone_diffs: &[f32],
+        move_counts: &[usize],
+        elapsed_secs: f64,
+        random_moves_black: Option<&[u32]>,
+        random_moves_white: Option<&[u32]>,
     ) -> Self {
         let batch_size = stone_diffs.len() as f32;
         if batch_size == 0.0 {
@@ -156,6 +183,23 @@ impl BatchStats {
             0.0
         };
 
+        let (avg_random_moves_black, avg_random_moves_white, random_rate_black, random_rate_white) =
+            if let (Some(rb), Some(rw)) = (random_moves_black, random_moves_white) {
+                debug_assert_eq!(rb.len(), stone_diffs.len());
+                debug_assert_eq!(rw.len(), stone_diffs.len());
+                let avg_rb = rb.iter().sum::<u32>() as f32 / batch_size;
+                let avg_rw = rw.iter().sum::<u32>() as f32 / batch_size;
+                let moves_per_color = (avg_move_count / 2.0).max(1e-6);
+                (
+                    avg_rb,
+                    avg_rw,
+                    (avg_rb / moves_per_color) * 100.0,
+                    (avg_rw / moves_per_color) * 100.0,
+                )
+            } else {
+                (0.0, 0.0, 0.0, 0.0)
+            };
+
         Self {
             games_completed,
             avg_stone_diff,
@@ -165,6 +209,10 @@ impl BatchStats {
             avg_move_count,
             elapsed_secs,
             games_per_sec,
+            avg_random_moves_black,
+            avg_random_moves_white,
+            random_move_rate_black: random_rate_black,
+            random_move_rate_white: random_rate_white,
         }
     }
 }
@@ -280,8 +328,38 @@ enum LogMessage {
     Warning(String),
     /// Info message.
     Info(String),
+    /// Deterministic evaluation sample summary.
+    Evaluation(u64, EvalLogEntry),
     /// Shutdown signal.
     Shutdown,
+}
+
+/// Deterministic evaluation sample metrics for logging.
+#[derive(Clone, Debug)]
+pub struct EvalLogEntry {
+    pub games_sampled: u64,
+    pub avg_stone_diff: f64,
+    pub black_win_rate: f64,
+    pub white_win_rate: f64,
+    pub draw_rate: f64,
+}
+
+impl EvalLogEntry {
+    pub fn new(
+        games_sampled: u64,
+        avg_stone_diff: f64,
+        black_win_rate: f64,
+        white_win_rate: f64,
+        draw_rate: f64,
+    ) -> Self {
+        Self {
+            games_sampled,
+            avg_stone_diff,
+            black_win_rate,
+            white_win_rate,
+            draw_rate,
+        }
+    }
 }
 
 /// Training logger for statistics output.
@@ -405,7 +483,7 @@ impl TrainingLogger {
             LogMessage::Batch(game_count, stats) => {
                 writeln!(
                     writer,
-                    "[{}] BATCH {:>8} | diff:{:>+6.2} | B:{:.1}% W:{:.1}% D:{:.1}% | moves:{:.1} | {:.2} g/s | {:.1}s",
+                    "[{}] BATCH {:>8} | diff:{:>+6.2} | B:{:.1}% W:{:.1}% D:{:.1}% | moves:{:.1} | rnd:B{:.1}% W{:.1}% | {:.2} g/s | {:.1}s",
                     timestamp,
                     game_count,
                     stats.avg_stone_diff,
@@ -413,6 +491,8 @@ impl TrainingLogger {
                     stats.white_win_rate * 100.0,
                     stats.draw_rate * 100.0,
                     stats.avg_move_count,
+                    stats.random_move_rate_black,
+                    stats.random_move_rate_white,
                     stats.games_per_sec,
                     stats.elapsed_secs
                 )?;
@@ -501,6 +581,19 @@ impl TrainingLogger {
             }
             LogMessage::Info(msg) => {
                 writeln!(writer, "[{}] INFO: {}", timestamp, msg)?;
+            }
+            LogMessage::Evaluation(game_count, entry) => {
+                writeln!(
+                    writer,
+                    "[{}] EVAL {:>8} | sample:{} | diff:{:+.2} | B:{:.1}% W:{:.1}% D:{:.1}%",
+                    timestamp,
+                    game_count,
+                    entry.games_sampled,
+                    entry.avg_stone_diff,
+                    entry.black_win_rate * 100.0,
+                    entry.white_win_rate * 100.0,
+                    entry.draw_rate * 100.0
+                )?;
             }
             LogMessage::Shutdown => {}
         }
@@ -602,6 +695,11 @@ impl TrainingLogger {
     /// * `message` - Info message
     pub fn log_info(&self, message: &str) {
         let _ = self.sender.send(LogMessage::Info(message.to_string()));
+    }
+
+    /// Log deterministic evaluation sample summary.
+    pub fn log_evaluation(&self, game_count: u64, entry: EvalLogEntry) {
+        let _ = self.sender.send(LogMessage::Evaluation(game_count, entry));
     }
 
     /// Check for evaluation divergence and log warning if detected.

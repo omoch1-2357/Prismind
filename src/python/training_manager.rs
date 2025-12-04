@@ -245,7 +245,8 @@ impl PyTrainingManager {
     /// # Requirements
     ///
     /// - Req 2.1: start_training with target games, checkpoint/callback intervals
-    #[pyo3(signature = (target_games, checkpoint_interval=10000, callback_interval=100, search_time_ms=15, epsilon=0.1))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (target_games, checkpoint_interval=10000, callback_interval=100, search_time_ms=15, epsilon=0.1, eval_interval_games=None, eval_sample_games=None))]
     pub fn start_training(
         &mut self,
         py: Python<'_>,
@@ -254,6 +255,8 @@ impl PyTrainingManager {
         callback_interval: u64,
         search_time_ms: u64,
         epsilon: f64,
+        eval_interval_games: Option<u64>,
+        eval_sample_games: Option<u64>,
     ) -> PyResult<PyTrainingResult> {
         // Validate parameters
         if target_games == 0 {
@@ -273,14 +276,21 @@ impl PyTrainingManager {
         }
 
         // Update config
-        {
+        let (eval_interval, eval_games) = {
             let mut config = self
                 .config
                 .lock()
                 .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {}", e)))?;
             config.checkpoint_interval = checkpoint_interval;
             config.search_time_ms = search_time_ms;
-        }
+            if let Some(interval) = eval_interval_games {
+                config.eval_interval_games = interval;
+            }
+            if let Some(games) = eval_sample_games {
+                config.eval_sample_games = games;
+            }
+            (config.eval_interval_games, config.eval_sample_games)
+        };
 
         // Get or create engine
         let mut engine_guard = self
@@ -309,6 +319,7 @@ impl PyTrainingManager {
         engine.set_callback_interval(callback_interval);
         engine.set_checkpoint_interval(checkpoint_interval);
         engine.set_search_time_ms(search_time_ms);
+        engine.set_eval_sample_config(eval_interval, eval_games);
 
         // Get callback if set (need to clone the PyObject with GIL)
         let callback_clone = {

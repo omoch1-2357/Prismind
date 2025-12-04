@@ -48,9 +48,11 @@ use crate::learning::error_handler::{
 };
 use crate::learning::logger::{
     BatchStats, DEFAULT_BATCH_INTERVAL, DEFAULT_CHECKPOINT_INTERVAL, DEFAULT_DETAILED_INTERVAL,
-    DetailedStats, TrainingLogger,
+    DetailedStats, EvalLogEntry, TrainingLogger,
 };
-use crate::learning::self_play::{DEFAULT_SEARCH_TIME_MS, EpsilonSchedule, GameResult, play_game};
+use crate::learning::self_play::{
+    DEFAULT_SEARCH_TIME_MS, EpsilonSchedule, GameResult, StartingPlayer, play_game,
+};
 use crate::learning::td_learner::{MoveRecord, TDLearner};
 use crate::pattern::Pattern;
 use crate::search::Search;
@@ -248,6 +250,10 @@ pub struct TrainingConfig {
     pub log_dir: PathBuf,
     /// Pattern definitions file path.
     pub pattern_file: PathBuf,
+    /// Games between deterministic evaluation samples (0 disables).
+    pub eval_interval_games: u64,
+    /// Number of games per deterministic evaluation sample (0 disables).
+    pub eval_sample_games: u64,
 }
 
 impl Default for TrainingConfig {
@@ -263,6 +269,8 @@ impl Default for TrainingConfig {
             checkpoint_dir: PathBuf::from("checkpoints"),
             log_dir: PathBuf::from("logs"),
             pattern_file: PathBuf::from("patterns.csv"),
+            eval_interval_games: 0,
+            eval_sample_games: 0,
         }
     }
 }
@@ -284,6 +292,47 @@ pub struct TrainingStats {
     pub white_win_rate: f32,
     /// Draw rate.
     pub draw_rate: f32,
+}
+
+#[derive(Clone, Debug, Default)]
+struct EvaluationSummary {
+    games_played: u64,
+    black_wins: u64,
+    white_wins: u64,
+    draws: u64,
+    total_stone_diff: f64,
+}
+
+impl EvaluationSummary {
+    fn record(&mut self, result: &GameResult) {
+        self.games_played += 1;
+        if result.final_score > 0.0 {
+            self.black_wins += 1;
+        } else if result.final_score < 0.0 {
+            self.white_wins += 1;
+        } else {
+            self.draws += 1;
+        }
+        self.total_stone_diff += result.final_score as f64;
+    }
+
+    fn into_entry(self) -> EvalLogEntry {
+        if self.games_played == 0 {
+            return EvalLogEntry::new(0, 0.0, 0.0, 0.0, 0.0);
+        }
+        let games_f = self.games_played as f64;
+        let avg_stone_diff = self.total_stone_diff / games_f;
+        let black_win_rate = self.black_wins as f64 / games_f;
+        let white_win_rate = self.white_wins as f64 / games_f;
+        let draw_rate = self.draws as f64 / games_f;
+        EvalLogEntry::new(
+            self.games_played,
+            avg_stone_diff,
+            black_win_rate,
+            white_win_rate,
+            draw_rate,
+        )
+    }
 }
 
 /// Main training engine for self-play learning.
@@ -350,6 +399,10 @@ pub struct TrainingEngine {
     accumulated_stone_diff_stats: (f64, u64),
     /// Accumulated win counts (black, white, draw) for progress tracking.
     accumulated_wins: (u64, u64, u64),
+    /// Total random moves executed by black/white for diagnostics.
+    total_random_moves: (u64, u64),
+    /// Next game count threshold for deterministic evaluation sampling.
+    next_eval_game: Option<u64>,
 }
 
 impl TrainingEngine {
@@ -420,6 +473,9 @@ impl TrainingEngine {
         // Setup interrupt handler (uses global OnceLock for single registration)
         let interrupted = setup_signal_handler()?;
 
+        let eval_interval = config.eval_interval_games;
+        let eval_sample = config.eval_sample_games;
+
         Ok(Self {
             patterns,
             eval_table,
@@ -442,6 +498,12 @@ impl TrainingEngine {
             callback_interval: DEFAULT_CALLBACK_INTERVAL,
             accumulated_stone_diff_stats: (0.0, 0),
             accumulated_wins: (0, 0, 0),
+            total_random_moves: (0, 0),
+            next_eval_game: if eval_interval > 0 && eval_sample > 0 {
+                Some(eval_interval)
+            } else {
+                None
+            },
         })
     }
 
@@ -524,6 +586,9 @@ impl TrainingEngine {
         // Using (sum, count) tuple instead of Vec to avoid memory issues
         let accumulated_stone_diff_stats = (meta.total_stone_diff_sum, meta.total_games_for_stats);
 
+        let eval_interval = config.eval_interval_games;
+        let eval_sample = config.eval_sample_games;
+
         Ok(Self {
             patterns,
             eval_table,
@@ -547,6 +612,12 @@ impl TrainingEngine {
             // Restore accumulated statistics from checkpoint
             accumulated_stone_diff_stats,
             accumulated_wins: meta.accumulated_wins,
+            total_random_moves: (0, 0),
+            next_eval_game: if eval_interval > 0 && eval_sample > 0 {
+                Some(meta.game_count + eval_interval)
+            } else {
+                None
+            },
         })
     }
 
@@ -603,6 +674,10 @@ impl TrainingEngine {
         // Stats accumulators
         let mut batch_stone_diffs = Vec::with_capacity(self.config.log_interval as usize);
         let mut batch_move_counts = Vec::with_capacity(self.config.log_interval as usize);
+        let mut batch_random_moves_black: Vec<u32> =
+            Vec::with_capacity(self.config.log_interval as usize);
+        let mut batch_random_moves_white: Vec<u32> =
+            Vec::with_capacity(self.config.log_interval as usize);
         let mut detailed_eval_values = Vec::new();
         let mut detailed_search_depths = Vec::new();
         let mut detailed_search_times = Vec::new();
@@ -626,10 +701,18 @@ impl TrainingEngine {
 
             // Play games in parallel
             let epsilon = EpsilonSchedule::get(self.game_count);
+            let base_game_index = self.game_count;
             let results: Vec<Result<GameResult, LearningError>> = pool.install(|| {
                 (0..batch_size)
                     .into_par_iter()
-                    .map(|_| self.play_single_game(epsilon))
+                    .map(|offset| {
+                        let starting_player = if (base_game_index + offset) & 1 == 0 {
+                            StartingPlayer::Black
+                        } else {
+                            StartingPlayer::White
+                        };
+                        self.play_single_game(epsilon, starting_player)
+                    })
                     .collect()
             });
 
@@ -650,6 +733,10 @@ impl TrainingEngine {
                                 // Accumulate stats
                                 batch_stone_diffs.push(game_result.final_score);
                                 batch_move_counts.push(game_result.moves_played);
+                                batch_random_moves_black.push(game_result.random_moves_black);
+                                batch_random_moves_white.push(game_result.random_moves_white);
+                                self.total_random_moves.0 += game_result.random_moves_black as u64;
+                                self.total_random_moves.1 += game_result.random_moves_white as u64;
 
                                 // Record for convergence monitoring
                                 self.convergence.record_game(
@@ -714,11 +801,13 @@ impl TrainingEngine {
                 && !batch_stone_diffs.is_empty()
             {
                 let elapsed = self.total_elapsed_secs();
-                let stats = BatchStats::from_games(
+                let stats = BatchStats::from_games_with_random(
                     self.game_count,
                     &batch_stone_diffs,
                     &batch_move_counts,
                     elapsed,
+                    Some(&batch_random_moves_black),
+                    Some(&batch_random_moves_white),
                 );
                 self.logger.log_batch(self.game_count, &stats);
                 self.logger.log_progress(self.game_count, target_games);
@@ -730,6 +819,8 @@ impl TrainingEngine {
 
                 batch_stone_diffs.clear();
                 batch_move_counts.clear();
+                batch_random_moves_black.clear();
+                batch_random_moves_white.clear();
             }
 
             // Detailed logging (every 10,000 games)
@@ -775,6 +866,8 @@ impl TrainingEngine {
             if prev_checkpoint_num < curr_checkpoint_num {
                 self.save_checkpoint()?;
             }
+
+            self.maybe_run_eval_sample()?;
         }
 
         self.get_training_stats()
@@ -789,7 +882,11 @@ impl TrainingEngine {
     /// # Requirements
     ///
     /// - Req 8.7: Reduce TT size on memory allocation failure
-    fn play_single_game(&self, epsilon: f32) -> Result<GameResult, LearningError> {
+    fn play_single_game(
+        &self,
+        epsilon: f32,
+        starting_player: StartingPlayer,
+    ) -> Result<GameResult, LearningError> {
         // Acquire read lock to get a snapshot of the evaluation table
         let table = self.eval_table.read().expect("RwLock poisoned");
 
@@ -822,7 +919,40 @@ impl TrainingEngine {
             epsilon,
             self.config.search_time_ms,
             &mut rng,
+            starting_player,
         )
+    }
+
+    fn run_eval_sample(&self, games: u64) -> Result<EvalLogEntry, LearningError> {
+        if games == 0 {
+            return Ok(EvalLogEntry::new(0, 0.0, 0.0, 0.0, 0.0));
+        }
+        let mut summary = EvaluationSummary::default();
+        for i in 0..games {
+            let starting_player = if i & 1 == 0 {
+                StartingPlayer::Black
+            } else {
+                StartingPlayer::White
+            };
+            let game = self.play_single_game(0.0, starting_player)?;
+            summary.record(&game);
+        }
+        Ok(summary.into_entry())
+    }
+
+    fn maybe_run_eval_sample(&mut self) -> Result<(), LearningError> {
+        if self.config.eval_sample_games == 0 || self.config.eval_interval_games == 0 {
+            return Ok(());
+        }
+        if self
+            .next_eval_game
+            .is_some_and(|next_game| self.game_count >= next_game)
+        {
+            let entry = self.run_eval_sample(self.config.eval_sample_games)?;
+            self.logger.log_evaluation(self.game_count, entry);
+            self.next_eval_game = Some(self.game_count + self.config.eval_interval_games);
+        }
+        Ok(())
     }
 
     /// Perform TD update for a completed game.
@@ -1195,6 +1325,17 @@ impl TrainingEngine {
         self.config.search_time_ms
     }
 
+    /// Update deterministic evaluation sampling parameters.
+    pub fn set_eval_sample_config(&mut self, interval: u64, games: u64) {
+        self.config.eval_interval_games = interval;
+        self.config.eval_sample_games = games;
+        self.next_eval_game = if interval > 0 && games > 0 {
+            Some(self.game_count + interval)
+        } else {
+            None
+        };
+    }
+
     /// Start training with a target game count and optional progress callback.
     ///
     /// This method implements the complete training loop with:
@@ -1257,6 +1398,10 @@ impl TrainingEngine {
         // Stats accumulators for logging
         let mut batch_stone_diffs = Vec::with_capacity(self.config.log_interval as usize);
         let mut batch_move_counts = Vec::with_capacity(self.config.log_interval as usize);
+        let mut batch_random_moves_black: Vec<u32> =
+            Vec::with_capacity(self.config.log_interval as usize);
+        let mut batch_random_moves_white: Vec<u32> =
+            Vec::with_capacity(self.config.log_interval as usize);
         let mut detailed_eval_values = Vec::new();
         let mut detailed_search_depths = Vec::new();
         let mut detailed_search_times = Vec::new();
@@ -1286,10 +1431,18 @@ impl TrainingEngine {
 
             // Play games in parallel
             let epsilon = EpsilonSchedule::get(self.game_count);
+            let base_game_index = self.game_count;
             let results: Vec<Result<GameResult, LearningError>> = pool.install(|| {
                 (0..batch_size)
                     .into_par_iter()
-                    .map(|_| self.play_single_game(epsilon))
+                    .map(|offset| {
+                        let starting_player = if (base_game_index + offset) & 1 == 0 {
+                            StartingPlayer::Black
+                        } else {
+                            StartingPlayer::White
+                        };
+                        self.play_single_game(epsilon, starting_player)
+                    })
                     .collect()
             });
 
@@ -1308,6 +1461,10 @@ impl TrainingEngine {
                                 let stone_diff = game_result.final_score;
                                 batch_stone_diffs.push(stone_diff);
                                 batch_move_counts.push(game_result.moves_played);
+                                batch_random_moves_black.push(game_result.random_moves_black);
+                                batch_random_moves_white.push(game_result.random_moves_white);
+                                self.total_random_moves.0 += game_result.random_moves_black as u64;
+                                self.total_random_moves.1 += game_result.random_moves_white as u64;
 
                                 // Accumulate for progress tracking (using sum and count)
                                 self.accumulated_stone_diff_stats.0 += stone_diff as f64;
@@ -1378,11 +1535,13 @@ impl TrainingEngine {
                 && !batch_stone_diffs.is_empty()
             {
                 let elapsed = self.total_elapsed_secs();
-                let stats = BatchStats::from_games(
+                let stats = BatchStats::from_games_with_random(
                     self.game_count,
                     &batch_stone_diffs,
                     &batch_move_counts,
                     elapsed,
+                    Some(&batch_random_moves_black),
+                    Some(&batch_random_moves_white),
                 );
                 self.logger.log_batch(self.game_count, &stats);
                 self.logger.log_progress(self.game_count, target_games);
@@ -1393,6 +1552,8 @@ impl TrainingEngine {
 
                 batch_stone_diffs.clear();
                 batch_move_counts.clear();
+                batch_random_moves_black.clear();
+                batch_random_moves_white.clear();
             }
 
             // Detailed logging (every 10,000 games)
@@ -1437,6 +1598,8 @@ impl TrainingEngine {
             if prev_checkpoint_num < curr_checkpoint_num {
                 self.save_checkpoint()?;
             }
+
+            self.maybe_run_eval_sample()?;
         }
 
         // Training completed successfully (Req 2.6)
@@ -1695,7 +1858,7 @@ impl TrainingEngine {
         let original_time = self.config.search_time_ms;
         self.config.search_time_ms = time_ms;
 
-        let result = self.play_single_game(epsilon);
+        let result = self.play_single_game(epsilon, StartingPlayer::Black);
 
         // Restore original time
         self.config.search_time_ms = original_time;
@@ -1751,7 +1914,14 @@ impl TrainingEngine {
         let results: Vec<Result<GameResult, LearningError>> = pool.install(|| {
             (0..game_count)
                 .into_par_iter()
-                .map(|_| self.play_single_game(epsilon))
+                .map(|offset| {
+                    let starting_player = if offset & 1 == 0 {
+                        StartingPlayer::Black
+                    } else {
+                        StartingPlayer::White
+                    };
+                    self.play_single_game(epsilon, starting_player)
+                })
                 .collect()
         });
 
@@ -1845,6 +2015,8 @@ mod tests {
             checkpoint_dir: temp_dir.path().join("checkpoints"),
             log_dir: temp_dir.path().join("logs"),
             pattern_file: PathBuf::from("patterns.csv"),
+            eval_interval_games: 0,
+            eval_sample_games: 0,
         }
     }
 

@@ -65,7 +65,14 @@ fn test_single_self_play_game_completion() {
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
     // Play a single game with epsilon=0.15 (high exploration phase)
-    let result = play_game(&mut search, &patterns, 0.15, 15, &mut rng);
+    let result = play_game(
+        &mut search,
+        &patterns,
+        0.15,
+        15,
+        &mut rng,
+        StartingPlayer::Black,
+    );
 
     // Verify game completed with valid result
     match result {
@@ -115,7 +122,15 @@ fn test_self_play_game_produces_valid_history() {
     let mut search = Search::new(evaluator, 128).expect("Failed to create search");
     let mut rng = rand::rngs::StdRng::seed_from_u64(123);
 
-    let result = play_game(&mut search, &patterns, 0.15, 15, &mut rng).unwrap();
+    let result = play_game(
+        &mut search,
+        &patterns,
+        0.15,
+        15,
+        &mut rng,
+        StartingPlayer::Black,
+    )
+    .unwrap();
 
     // Check history properties
     let history = &result.history;
@@ -158,7 +173,15 @@ fn test_td_update_produces_weight_changes() {
     let mut rng = rand::rngs::StdRng::seed_from_u64(456);
 
     // Play a game to get history
-    let result = play_game(&mut search, &patterns, 0.15, 15, &mut rng).unwrap();
+    let result = play_game(
+        &mut search,
+        &patterns,
+        0.15,
+        15,
+        &mut rng,
+        StartingPlayer::Black,
+    )
+    .unwrap();
 
     // Convert history to TD format
     let move_records = game_history_to_move_records(&result.history);
@@ -200,7 +223,15 @@ fn test_td_update_direction_matches_outcome() {
     let mut rng = rand::rngs::StdRng::seed_from_u64(789);
 
     // Play a game
-    let result = play_game(&mut search, &patterns, 0.15, 15, &mut rng).unwrap();
+    let result = play_game(
+        &mut search,
+        &patterns,
+        0.15,
+        15,
+        &mut rng,
+        StartingPlayer::Black,
+    )
+    .unwrap();
 
     // Convert history to TD format
     let move_records = game_history_to_move_records(&result.history);
@@ -471,6 +502,7 @@ fn test_phase2_search_api_integration() {
         0.15,
         DEFAULT_SEARCH_TIME_MS,
         &mut rng,
+        StartingPlayer::Black,
     );
     assert!(
         result.is_ok(),
@@ -493,7 +525,15 @@ fn test_search_integration_returns_valid_moves() {
     let mut search = Search::new(evaluator, 128).expect("Failed to create search");
     let mut rng = rand::rngs::StdRng::seed_from_u64(1111);
 
-    let result = play_game(&mut search, &patterns, 0.15, 15, &mut rng).unwrap();
+    let result = play_game(
+        &mut search,
+        &patterns,
+        0.15,
+        15,
+        &mut rng,
+        StartingPlayer::Black,
+    )
+    .unwrap();
 
     // All stages should be valid (0-29)
     for record in result.history.iter() {
@@ -594,7 +634,15 @@ fn test_integration_requirements_summary() {
     let mut search = Search::new(evaluator, 128).expect("Failed to create search");
     let mut rng = rand::rngs::StdRng::seed_from_u64(2222);
 
-    let result = play_game(&mut search, &patterns, 0.15, 15, &mut rng).unwrap();
+    let result = play_game(
+        &mut search,
+        &patterns,
+        0.15,
+        15,
+        &mut rng,
+        StartingPlayer::Black,
+    )
+    .unwrap();
     let move_records = game_history_to_move_records(&result.history);
 
     let mut learner = TDLearner::default_lambda();

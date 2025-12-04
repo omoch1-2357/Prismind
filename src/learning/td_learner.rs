@@ -365,7 +365,7 @@ mod tests {
                 0.0,                               // Initial leaf value of 0
                 [i % 1000; NUM_PATTERN_INSTANCES], // Simple pattern indices
                 i / 2,                             // Stage increases every 2 moves
-                i % 2 == 0,                        // Alternating turns (Black first)
+                i & 1 == 0,                        // Alternating turns (Black first)
             );
             history.push(record);
         }
@@ -458,7 +458,7 @@ mod tests {
                 0.0, // Leaf value of 0
                 [0; NUM_PATTERN_INSTANCES],
                 0,
-                i % 2 == 0,
+                i & 1 == 0,
             ));
         }
 
@@ -597,7 +597,7 @@ mod tests {
                 0.0,
                 [100; NUM_PATTERN_INSTANCES], // All using index 100
                 0,                            // All same stage
-                i % 2 == 0,
+                i & 1 == 0,
             ));
         }
 

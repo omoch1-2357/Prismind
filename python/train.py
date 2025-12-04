@@ -78,6 +78,8 @@ class TrainingManagerProtocol(Protocol):
         callback_interval: int,
         search_time_ms: int,
         epsilon: float,
+        eval_interval_games: Optional[int] = None,
+        eval_sample_games: Optional[int] = None,
     ) -> "TrainingResult":
         """Start training."""
         ...
@@ -349,6 +351,20 @@ Examples:
         help="Epsilon for exploration. Format: constant value, or 'start:end:games' for decay (default: 0.1)",
     )
 
+    parser.add_argument(
+        "--eval-interval",
+        type=int,
+        default=0,
+        help="Games between deterministic evaluation samples (0 disables)",
+    )
+
+    parser.add_argument(
+        "--eval-games",
+        type=int,
+        default=32,
+        help="Number of games per deterministic evaluation sample (default: 32)",
+    )
+
     # Resume options
     parser.add_argument(
         "--resume", "-r", action="store_true", help="Resume training from latest checkpoint"
@@ -419,6 +435,12 @@ def main() -> int:
     logger.info(f"Checkpoint interval: {args.checkpoint_interval:,}")
     logger.info(f"Search time: {args.search_time}ms")
     logger.info(f"Epsilon: {args.epsilon}")
+    if args.eval_interval > 0 and args.eval_games > 0:
+        logger.info(
+            f"Deterministic eval: every {args.eval_interval:,} games ({args.eval_games} games/sample)"
+        )
+    else:
+        logger.info("Deterministic eval: disabled")
     logger.info(f"Resume mode: {args.resume}")
     logger.info(f"Checkpoint dir: {args.checkpoint_dir}")
     logger.info(f"Log dir: {args.log_dir}")
@@ -481,6 +503,8 @@ def main() -> int:
             callback_interval=args.callback_interval,
             search_time_ms=args.search_time,
             epsilon=epsilon,
+            eval_interval_games=args.eval_interval,
+            eval_sample_games=args.eval_games,
         )
 
         # Log completion

@@ -108,7 +108,9 @@ pub use memory::{
     verify_game_history_released, verify_sparse_eligibility_trace,
 };
 pub use score::{CENTER, SCALE, initial_value, stone_diff_to_u16, u16_to_stone_diff};
-pub use self_play::{DEFAULT_SEARCH_TIME_MS, EpsilonSchedule, GameResult, play_game};
+pub use self_play::{
+    DEFAULT_SEARCH_TIME_MS, EpsilonSchedule, GameResult, StartingPlayer, play_game,
+};
 pub use shared_evaluator::SharedEvaluator;
 pub use td_learner::{MoveRecord, TDLearner, TDUpdateStats};
 pub use training_engine::{

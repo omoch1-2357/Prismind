@@ -13,16 +13,16 @@
 //!
 //! - Req 4.1: 初期オセロ配置から終了までの完全ゲーム
 //! - Req 4.2: 15ms制限のPhase 2 Search APIを使用
-//! - Req 4.3: ゲーム0-299,999でepsilon=0.15
-//! - Req 4.4: ゲーム300,000-699,999でepsilon=0.05
-//! - Req 4.5: ゲーム700,000-999,999でepsilon=0.0
+//! - Req 4.3: 初期フェーズで十分な探索を確保
+//! - Req 4.4: ゲーム進行に応じて探索率を段階的に低減
+//! - Req 4.5: 後半で搾取重視のプレイに切り替え
 //! - Req 4.6: ランダム手では現在盤面の静的評価をリーフ値として使用
 //! - Req 4.7: 各手のボード状態、リーフ評価、パターンインデックス、ステージを記録
 //! - Req 4.8: オセロルールに従ったパス処理
 //! - Req 4.9: 最終石差をゲーム結果として計算
 
 use crate::board::{
-    BitBoard, GameState, check_game_state, final_score, legal_moves, make_move_unchecked,
+    BitBoard, Color, GameState, check_game_state, final_score, legal_moves, make_move_unchecked,
 };
 use crate::evaluator::calculate_stage;
 use crate::learning::LearningError;
@@ -31,20 +31,29 @@ use crate::pattern::{Pattern, extract_all_patterns_into};
 use crate::search::Search;
 use rand::Rng;
 
-/// イプシロンスケジュールの高探索フェーズ終了ゲーム数
-const HIGH_EXPLORATION_END: u64 = 300_000;
+/// ウォームアップ高探索フェーズ（一定イプシロン）の終了ゲーム数
+const HIGH_EXPLORATION_END: u64 = 50_000;
 
-/// イプシロンスケジュールの中探索フェーズ終了ゲーム数
-const MODERATE_EXPLORATION_END: u64 = 700_000;
+/// スケジュール全体で探索を許す最終ゲーム（以降は純粋搾取）
+const MODERATE_EXPLORATION_END: u64 = 500_000;
 
-/// 高探索フェーズのイプシロン値（15%ランダム）
-const EPSILON_HIGH: f32 = 0.15;
+/// 線形減衰フェーズ終了（ここまでに0.12→0.04へ遷移）
+const LINEAR_DECAY_END: u64 = 200_000;
 
-/// 中探索フェーズのイプシロン値（5%ランダム）
-const EPSILON_MODERATE: f32 = 0.05;
+/// ウォームアップ中の固定イプシロン
+const EPSILON_WARMUP: f32 = 0.12;
 
-/// 搾取フェーズのイプシロン値（0%ランダム）
-const EPSILON_EXPLOITATION: f32 = 0.0;
+/// 線形減衰後に到達したい目標イプシロン
+const EPSILON_LINEAR_TARGET: f32 = 0.04;
+
+/// 指数減衰フェーズ中の下限（annealing中は完全0にしない）
+const EPSILON_FLOOR: f32 = 0.005;
+
+/// 最終搾取フェーズでの固定値
+const EPSILON_MINIMUM: f32 = 0.0;
+
+/// 指数減衰の時間定数（ゲーム数）
+const EXP_DECAY_TAU: f32 = 180_000.0;
 
 /// デフォルトの探索時間制限（ミリ秒）
 pub const DEFAULT_SEARCH_TIME_MS: u64 = 15;
@@ -58,15 +67,16 @@ pub const DEFAULT_SEARCH_TIME_MS: u64 = 15;
 ///
 /// | ゲーム範囲 | イプシロン | フェーズ |
 /// |-----------|----------|---------|
-/// | 0-299,999 | 0.15 | 高探索 |
-/// | 300,000-699,999 | 0.05 | 中探索 |
-/// | 700,000-999,999 | 0.0 | 搾取 |
+/// | 0-49,999 | 0.12 (固定) | ウォームアップ高探索 |
+/// | 50,000-199,999 | 0.12→0.04 (線形) | 安定化フェーズ |
+/// | 200,000-499,999 | 0.04→0.005 (指数) | アニーリング |
+/// | 500,000以降 | 0.0 | 搾取 |
 ///
 /// # 要件対応
 ///
-/// - Req 4.3: ゲーム0-299,999でepsilon=0.15
-/// - Req 4.4: ゲーム300,000-699,999でepsilon=0.05
-/// - Req 4.5: ゲーム700,000-999,999でepsilon=0.0
+/// - Req 4.3: 高探索フェーズ（0-49,999ゲーム）で大きめのランダム探索を維持
+/// - Req 4.4: 安定化フェーズ（50,000-199,999ゲーム）で線形に探索率を落とす
+/// - Req 4.5: アニーリング後（200,000ゲーム以降）で徐々に搾取モードへ切り替え
 pub struct EpsilonSchedule;
 
 impl EpsilonSchedule {
@@ -78,28 +88,33 @@ impl EpsilonSchedule {
     ///
     /// # 戻り値
     ///
-    /// イプシロン値（0.0-0.15）
+    /// イプシロン値（0.0-0.12）
     ///
     /// # 例
     ///
     /// ```
     /// use prismind::learning::self_play::EpsilonSchedule;
     ///
-    /// assert_eq!(EpsilonSchedule::get(0), 0.15);
-    /// assert_eq!(EpsilonSchedule::get(299_999), 0.15);
-    /// assert_eq!(EpsilonSchedule::get(300_000), 0.05);
-    /// assert_eq!(EpsilonSchedule::get(699_999), 0.05);
-    /// assert_eq!(EpsilonSchedule::get(700_000), 0.0);
-    /// assert_eq!(EpsilonSchedule::get(999_999), 0.0);
+    /// assert_eq!(EpsilonSchedule::get(0), 0.12);
+    /// assert_eq!(EpsilonSchedule::get(49_999), 0.12);
+    /// assert!(EpsilonSchedule::get(125_000) < 0.12);
+    /// assert!(EpsilonSchedule::get(350_000) > 0.0);
+    /// assert_eq!(EpsilonSchedule::get(500_000), 0.0);
     /// ```
     #[inline]
     pub fn get(game_num: u64) -> f32 {
         if game_num < HIGH_EXPLORATION_END {
-            EPSILON_HIGH
+            EPSILON_WARMUP
+        } else if game_num < LINEAR_DECAY_END {
+            let phase_progress = (game_num - HIGH_EXPLORATION_END) as f32
+                / (LINEAR_DECAY_END - HIGH_EXPLORATION_END) as f32;
+            EPSILON_WARMUP + (EPSILON_LINEAR_TARGET - EPSILON_WARMUP) * phase_progress
         } else if game_num < MODERATE_EXPLORATION_END {
-            EPSILON_MODERATE
+            let delta = (game_num - LINEAR_DECAY_END) as f32;
+            let decay = (-delta / EXP_DECAY_TAU).exp();
+            (EPSILON_LINEAR_TARGET * decay).max(EPSILON_FLOOR)
         } else {
-            EPSILON_EXPLOITATION
+            EPSILON_MINIMUM
         }
     }
 
@@ -135,6 +150,17 @@ pub struct GameResult {
     pub moves_played: usize,
     /// ランダムに選択された手の数
     pub random_moves: usize,
+    /// 黒番のランダム手数
+    pub random_moves_black: u32,
+    /// 白番のランダム手数
+    pub random_moves_white: u32,
+}
+
+/// ゲーム開始時の手番設定
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartingPlayer {
+    Black,
+    White,
 }
 
 /// 自己対戦ゲームをプレイ
@@ -171,7 +197,14 @@ pub struct GameResult {
 /// let patterns = load_patterns("patterns.csv").unwrap();
 /// let mut rng = thread_rng();
 ///
-/// let result = play_game(&mut search, &patterns, 0.15, DEFAULT_SEARCH_TIME_MS, &mut rng).unwrap();
+/// let result = play_game(
+///     &mut search,
+///     &patterns,
+///     0.12,
+///     DEFAULT_SEARCH_TIME_MS,
+///     &mut rng,
+///     StartingPlayer::Black,
+/// ).unwrap();
 /// println!("Game result: {} (moves: {})", result.final_score, result.moves_played);
 /// ```
 ///
@@ -189,10 +222,16 @@ pub fn play_game<R: Rng>(
     epsilon: f32,
     time_limit_ms: u64,
     rng: &mut R,
+    starting_player: StartingPlayer,
 ) -> Result<GameResult, LearningError> {
     let mut board = BitBoard::new();
+    if matches!(starting_player, StartingPlayer::White) {
+        board.toggle_turn();
+    }
     let mut history = GameHistory::new();
     let mut random_moves = 0;
+    let mut random_moves_black = 0u32;
+    let mut random_moves_white = 0u32;
 
     loop {
         // ゲーム状態を確認
@@ -205,6 +244,8 @@ pub fn play_game<R: Rng>(
                     final_score: score,
                     moves_played: board.move_count() as usize,
                     random_moves,
+                    random_moves_black,
+                    random_moves_white,
                 });
             }
             GameState::Pass => {
@@ -221,9 +262,15 @@ pub fn play_game<R: Rng>(
         let legal = legal_moves(&board);
         let is_random_move = rng.random::<f32>() < epsilon;
 
+        let current_player = board.turn();
         let (best_move, leaf_value) = if is_random_move {
             // ランダム手選択
             random_moves += 1;
+            if current_player == Color::Black {
+                random_moves_black += 1;
+            } else {
+                random_moves_white += 1;
+            }
             let move_pos = select_random_move(legal, rng);
 
             // Req 4.6: ランダム手では現在盤面の静的評価をリーフ値として使用
@@ -276,59 +323,108 @@ mod tests {
 
     // ========== Task 4.2: Epsilon Schedule Tests ==========
 
-    #[test]
-    fn test_epsilon_high_exploration_phase() {
-        // Req 4.3: ゲーム0-299,999でepsilon=0.15
-        assert_eq!(EpsilonSchedule::get(0), 0.15);
-        assert_eq!(EpsilonSchedule::get(1), 0.15);
-        assert_eq!(EpsilonSchedule::get(100_000), 0.15);
-        assert_eq!(EpsilonSchedule::get(299_999), 0.15);
+    fn approx_eq(value: f32, expected: f32) -> bool {
+        (value - expected).abs() < 1e-6
     }
 
     #[test]
-    fn test_epsilon_moderate_exploration_phase() {
-        // Req 4.4: ゲーム300,000-699,999でepsilon=0.05
-        assert_eq!(EpsilonSchedule::get(300_000), 0.05);
-        assert_eq!(EpsilonSchedule::get(300_001), 0.05);
-        assert_eq!(EpsilonSchedule::get(500_000), 0.05);
-        assert_eq!(EpsilonSchedule::get(699_999), 0.05);
+    fn test_epsilon_warmup_phase() {
+        assert!(approx_eq(EpsilonSchedule::get(0), EPSILON_WARMUP));
+        assert!(approx_eq(EpsilonSchedule::get(10_000), EPSILON_WARMUP));
+        assert!(approx_eq(
+            EpsilonSchedule::get(HIGH_EXPLORATION_END - 1),
+            EPSILON_WARMUP
+        ));
+    }
+
+    #[test]
+    fn test_epsilon_linear_decay_phase() {
+        let start = HIGH_EXPLORATION_END;
+        let end = LINEAR_DECAY_END - 1;
+        assert!(approx_eq(EpsilonSchedule::get(start), EPSILON_WARMUP));
+        assert!(approx_eq(EpsilonSchedule::get(end), EPSILON_LINEAR_TARGET));
+
+        // 中間点（50%進行）
+        let mid = start + (LINEAR_DECAY_END - HIGH_EXPLORATION_END) / 2;
+        assert!(approx_eq(EpsilonSchedule::get(mid), 0.08));
+    }
+
+    #[test]
+    fn test_epsilon_annealing_phase() {
+        let anneal_start = LINEAR_DECAY_END;
+        let anneal_mid = 350_000;
+        let anneal_late = 480_000;
+
+        assert!(approx_eq(
+            EpsilonSchedule::get(anneal_start),
+            EPSILON_LINEAR_TARGET
+        ));
+
+        let mid_expected = (EPSILON_LINEAR_TARGET
+            * (-(anneal_mid as f32 - LINEAR_DECAY_END as f32) / EXP_DECAY_TAU).exp())
+        .max(EPSILON_FLOOR);
+        assert!(approx_eq(EpsilonSchedule::get(anneal_mid), mid_expected));
+
+        let late_expected = (EPSILON_LINEAR_TARGET
+            * (-(anneal_late as f32 - LINEAR_DECAY_END as f32) / EXP_DECAY_TAU).exp())
+        .max(EPSILON_FLOOR);
+        assert!(approx_eq(EpsilonSchedule::get(anneal_late), late_expected));
+
+        // 499,999はまだフロアより上
+        assert!(EpsilonSchedule::get(MODERATE_EXPLORATION_END - 1) >= EPSILON_FLOOR);
     }
 
     #[test]
     fn test_epsilon_exploitation_phase() {
-        // Req 4.5: ゲーム700,000-999,999でepsilon=0.0
-        assert_eq!(EpsilonSchedule::get(700_000), 0.0);
-        assert_eq!(EpsilonSchedule::get(700_001), 0.0);
-        assert_eq!(EpsilonSchedule::get(999_999), 0.0);
-        assert_eq!(EpsilonSchedule::get(1_000_000), 0.0); // 範囲外も搾取フェーズ
+        assert!(approx_eq(
+            EpsilonSchedule::get(MODERATE_EXPLORATION_END),
+            EPSILON_MINIMUM
+        ));
+        assert!(approx_eq(
+            EpsilonSchedule::get(MODERATE_EXPLORATION_END + 50_000),
+            EPSILON_MINIMUM
+        ));
     }
 
     #[test]
     fn test_epsilon_boundary_transitions() {
-        // 境界でのフェーズ遷移を確認
-        // 高探索 -> 中探索
-        assert_eq!(EpsilonSchedule::get(299_999), 0.15);
-        assert_eq!(EpsilonSchedule::get(300_000), 0.05);
-
-        // 中探索 -> 搾取
-        assert_eq!(EpsilonSchedule::get(699_999), 0.05);
-        assert_eq!(EpsilonSchedule::get(700_000), 0.0);
+        assert!(approx_eq(
+            EpsilonSchedule::get(HIGH_EXPLORATION_END - 1),
+            EpsilonSchedule::get(HIGH_EXPLORATION_END)
+        ));
+        assert!(approx_eq(
+            EpsilonSchedule::get(LINEAR_DECAY_END - 1),
+            EpsilonSchedule::get(LINEAR_DECAY_END)
+        ));
+        assert!(approx_eq(
+            EpsilonSchedule::get(MODERATE_EXPLORATION_END - 1).max(EPSILON_MINIMUM),
+            EpsilonSchedule::get(MODERATE_EXPLORATION_END)
+        ));
     }
 
     #[test]
     fn test_epsilon_phase_helpers() {
         // フェーズ判定ヘルパーのテスト
         assert!(EpsilonSchedule::is_high_exploration(0));
-        assert!(EpsilonSchedule::is_high_exploration(299_999));
-        assert!(!EpsilonSchedule::is_high_exploration(300_000));
+        assert!(EpsilonSchedule::is_high_exploration(
+            HIGH_EXPLORATION_END - 1
+        ));
+        assert!(!EpsilonSchedule::is_high_exploration(HIGH_EXPLORATION_END));
 
-        assert!(!EpsilonSchedule::is_moderate_exploration(299_999));
-        assert!(EpsilonSchedule::is_moderate_exploration(300_000));
-        assert!(EpsilonSchedule::is_moderate_exploration(699_999));
-        assert!(!EpsilonSchedule::is_moderate_exploration(700_000));
+        assert!(EpsilonSchedule::is_moderate_exploration(
+            HIGH_EXPLORATION_END
+        ));
+        assert!(EpsilonSchedule::is_moderate_exploration(
+            MODERATE_EXPLORATION_END - 1
+        ));
+        assert!(!EpsilonSchedule::is_moderate_exploration(
+            MODERATE_EXPLORATION_END
+        ));
 
-        assert!(!EpsilonSchedule::is_exploitation(699_999));
-        assert!(EpsilonSchedule::is_exploitation(700_000));
+        assert!(!EpsilonSchedule::is_exploitation(
+            MODERATE_EXPLORATION_END - 1
+        ));
+        assert!(EpsilonSchedule::is_exploitation(MODERATE_EXPLORATION_END));
         assert!(EpsilonSchedule::is_exploitation(1_000_000));
     }
 
@@ -336,7 +432,9 @@ mod tests {
     fn test_epsilon_is_stateless() {
         // ステートレス計算の確認（同じ入力で同じ出力）
         for _ in 0..100 {
-            assert_eq!(EpsilonSchedule::get(500_000), 0.05);
+            let value = EpsilonSchedule::get(350_000);
+            let value2 = EpsilonSchedule::get(350_000);
+            assert!(approx_eq(value, value2));
         }
     }
 
@@ -415,11 +513,15 @@ mod tests {
             final_score: 10.0,
             moves_played: 50,
             random_moves: 5,
+            random_moves_black: 3,
+            random_moves_white: 2,
         };
 
         assert_eq!(result.final_score, 10.0);
         assert_eq!(result.moves_played, 50);
         assert_eq!(result.random_moves, 5);
+        assert_eq!(result.random_moves_black, 3);
+        assert_eq!(result.random_moves_white, 2);
     }
 
     // ========== Requirements Summary Tests ==========
@@ -429,24 +531,41 @@ mod tests {
         println!("=== Task 4.2: Epsilon Schedule Requirements Verification ===");
 
         // Req 4.3: 高探索フェーズ
-        assert_eq!(EpsilonSchedule::get(0), 0.15);
-        assert_eq!(EpsilonSchedule::get(299_999), 0.15);
-        println!("  4.3: Games 0-299,999 return epsilon=0.15");
+        assert!(approx_eq(EpsilonSchedule::get(0), EPSILON_WARMUP));
+        assert!(approx_eq(
+            EpsilonSchedule::get(HIGH_EXPLORATION_END - 1),
+            EPSILON_WARMUP
+        ));
+        println!(
+            "  4.3: Games 0-{} keep epsilon={}",
+            HIGH_EXPLORATION_END - 1,
+            EPSILON_WARMUP
+        );
 
-        // Req 4.4: 中探索フェーズ
-        assert_eq!(EpsilonSchedule::get(300_000), 0.05);
-        assert_eq!(EpsilonSchedule::get(699_999), 0.05);
-        println!("  4.4: Games 300,000-699,999 return epsilon=0.05");
+        // Req 4.4: 安定化フェーズ（線形 + 指数減衰）
+        assert!(EpsilonSchedule::get(HIGH_EXPLORATION_END) > EPSILON_LINEAR_TARGET);
+        assert!(EpsilonSchedule::get(MODERATE_EXPLORATION_END - 1) >= EPSILON_FLOOR);
+        println!(
+            "  4.4: Games {}-{} anneal epsilon toward {}",
+            HIGH_EXPLORATION_END,
+            MODERATE_EXPLORATION_END - 1,
+            EPSILON_FLOOR
+        );
 
         // Req 4.5: 搾取フェーズ
-        assert_eq!(EpsilonSchedule::get(700_000), 0.0);
-        assert_eq!(EpsilonSchedule::get(999_999), 0.0);
-        println!("  4.5: Games 700,000-999,999 return epsilon=0.0");
+        assert!(approx_eq(
+            EpsilonSchedule::get(MODERATE_EXPLORATION_END),
+            EPSILON_MINIMUM
+        ));
+        println!(
+            "  4.5: Games {}+ return epsilon={}",
+            MODERATE_EXPLORATION_END, EPSILON_MINIMUM
+        );
 
         // ステートレス計算
         let e1 = EpsilonSchedule::get(500_000);
         let e2 = EpsilonSchedule::get(500_000);
-        assert_eq!(e1, e2);
+        assert!(approx_eq(e1, e2));
         println!("  Stateless computation verified");
 
         println!("=== All Task 4.2 requirements verified ===");
