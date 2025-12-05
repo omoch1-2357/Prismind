@@ -80,6 +80,8 @@ class TrainingManagerProtocol(Protocol):
         epsilon: float,
         eval_interval_games: Optional[int] = None,
         eval_sample_games: Optional[int] = None,
+        num_threads: Optional[int] = None,
+        games_per_thread: Optional[int] = None,
     ) -> "TrainingResult":
         """Start training."""
         ...
@@ -344,6 +346,19 @@ Examples:
     )
 
     parser.add_argument(
+        "--threads",
+        type=int,
+        default=0,
+        help="Number of self-play worker threads (default: auto-detect)",
+    )
+    parser.add_argument(
+        "--games-per-thread",
+        type=int,
+        default=4,
+        help="How many self-play games each worker runs before syncing (default: 4)",
+    )
+
+    parser.add_argument(
         "--epsilon",
         "-e",
         type=str,
@@ -434,6 +449,8 @@ def main() -> int:
     logger.info(f"Target games: {args.target_games:,}")
     logger.info(f"Checkpoint interval: {args.checkpoint_interval:,}")
     logger.info(f"Search time: {args.search_time}ms")
+    logger.info(f"Threads: {args.threads if args.threads > 0 else 'auto'}")
+    logger.info(f"Games per thread sync: {args.games_per_thread}")
     logger.info(f"Epsilon: {args.epsilon}")
     if args.eval_interval > 0 and args.eval_games > 0:
         logger.info(
@@ -497,6 +514,9 @@ def main() -> int:
         logger.info("Starting training...")
         start_time = time.time()
 
+        threads_arg = None if args.threads <= 0 else args.threads
+        games_per_thread_arg = None if args.games_per_thread <= 0 else args.games_per_thread
+
         result = training_mgr.start_training(
             target_games=args.target_games,
             checkpoint_interval=args.checkpoint_interval,
@@ -505,6 +525,8 @@ def main() -> int:
             epsilon=epsilon,
             eval_interval_games=args.eval_interval,
             eval_sample_games=args.eval_games,
+            num_threads=threads_arg,
+            games_per_thread=games_per_thread_arg,
         )
 
         # Log completion

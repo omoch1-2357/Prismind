@@ -59,6 +59,8 @@ use crate::pattern::Pattern;
 use crate::search::Search;
 
 /// Default number of threads for parallel game execution.
+/// When hardware supports more cores, runtime detection is preferred; this
+/// constant is used as a conservative fallback.
 pub const DEFAULT_NUM_THREADS: usize = 4;
 
 /// Default transposition table size in MB.
@@ -85,6 +87,15 @@ pub const TOTAL_PATTERN_ENTRIES: u64 = 30
 
 /// Default progress callback interval (100 games).
 pub const DEFAULT_CALLBACK_INTERVAL: u64 = 100;
+
+/// Determine a sensible default thread count based on available parallelism.
+/// Falls back to `DEFAULT_NUM_THREADS` if detection fails.
+pub fn default_num_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(DEFAULT_NUM_THREADS)
+        .max(1)
+}
 
 // ============================================================================
 // Phase 4 Task 5: Training State Machine
@@ -243,6 +254,8 @@ pub struct TrainingConfig {
     pub detailed_log_interval: u64,
     /// Time limit per move in milliseconds (default: 15).
     pub search_time_ms: u64,
+    /// Number of games a worker plays before synchronization (default: 4).
+    pub worker_batch_size: u64,
     /// TD decay parameter (default: 0.3).
     pub lambda: f32,
     /// Checkpoint output directory.
@@ -261,11 +274,12 @@ impl Default for TrainingConfig {
     fn default() -> Self {
         Self {
             tt_size_mb: DEFAULT_TT_SIZE_MB,
-            num_threads: DEFAULT_NUM_THREADS,
+            num_threads: default_num_threads(),
             checkpoint_interval: DEFAULT_CHECKPOINT_INTERVAL,
             log_interval: DEFAULT_BATCH_INTERVAL,
             detailed_log_interval: DEFAULT_DETAILED_INTERVAL,
             search_time_ms: DEFAULT_SEARCH_TIME_MS,
+            worker_batch_size: 4,
             lambda: 0.3,
             checkpoint_dir: PathBuf::from("checkpoints"),
             log_dir: PathBuf::from("logs"),
@@ -1348,6 +1362,16 @@ impl TrainingEngine {
         self.config.search_time_ms = time_ms;
     }
 
+    /// Set number of rayon worker threads for parallel self-play.
+    pub fn set_num_threads(&mut self, num_threads: usize) {
+        self.config.num_threads = num_threads.max(1);
+    }
+
+    /// Set how many games each worker plays before synchronizing.
+    pub fn set_worker_batch_size(&mut self, batch_size: u64) {
+        self.config.worker_batch_size = batch_size.max(1);
+    }
+
     /// Get the current search time per move.
     pub fn search_time_ms(&self) -> u64 {
         self.config.search_time_ms
@@ -1453,103 +1477,128 @@ impl TrainingEngine {
             // Save game count before batch for checkpoint boundary detection
             let game_count_before_batch = self.game_count;
 
-            // Determine batch size
+            // Determine batch size and worker assignments (each worker can play multiple games)
             let remaining = target_games - self.game_count;
-            let batch_size = remaining.min(self.config.num_threads as u64);
+            let worker_batch = self.config.worker_batch_size;
+            let max_workers = self.config.num_threads as u64;
+            let planned_batch = remaining.min(worker_batch * max_workers);
 
-            // Play games in parallel
+            let mut work_items: Vec<(u64, u64)> = Vec::with_capacity(max_workers as usize);
+            let mut offset = 0u64;
+            for _ in 0..max_workers {
+                if offset >= planned_batch {
+                    break;
+                }
+                let remaining_for_worker = planned_batch - offset;
+                let games_for_worker = remaining_for_worker.min(worker_batch);
+                work_items.push((offset, games_for_worker));
+                offset += games_for_worker;
+            }
+
+            // Play games in parallel; each worker returns a Vec of results
             let epsilon = EpsilonSchedule::get(self.game_count);
             let base_game_index = self.game_count;
-            let results: Vec<Result<GameResult, LearningError>> = pool.install(|| {
-                (0..batch_size)
+            let results: Vec<Vec<Result<GameResult, LearningError>>> = pool.install(|| {
+                work_items
                     .into_par_iter()
-                    .map(|offset| {
-                        let starting_player = if (base_game_index + offset) & 1 == 0 {
-                            StartingPlayer::Black
-                        } else {
-                            StartingPlayer::White
-                        };
-                        self.play_single_game(epsilon, starting_player)
+                    .map(|(start_offset, games_for_worker)| {
+                        let mut local_results = Vec::with_capacity(games_for_worker as usize);
+                        for g in 0..games_for_worker {
+                            let global_game_idx = base_game_index + start_offset + g;
+                            let starting_player = if (global_game_idx & 1) == 0 {
+                                StartingPlayer::Black
+                            } else {
+                                StartingPlayer::White
+                            };
+                            local_results.push(self.play_single_game(epsilon, starting_player));
+                        }
+                        local_results
                     })
                     .collect()
             });
 
             // Process results sequentially for TD updates
-            for result in results {
-                match result {
-                    Ok(game_result) => {
-                        // Perform TD update
-                        let td_result = catch_panic(|| self.perform_td_update(&game_result));
+            for worker_results in results {
+                for result in worker_results {
+                    match result {
+                        Ok(game_result) => {
+                            // Perform TD update
+                            let td_result = catch_panic(|| self.perform_td_update(&game_result));
 
-                        match td_result {
-                            crate::learning::error_handler::PanicCatchResult::Ok(()) => {
-                                self.error_tracker.record_success();
+                            match td_result {
+                                crate::learning::error_handler::PanicCatchResult::Ok(()) => {
+                                    self.error_tracker.record_success();
 
-                                // Track stats
-                                let stone_diff = game_result.final_score;
-                                batch_stone_diffs.push(stone_diff);
-                                batch_move_counts.push(game_result.moves_played);
-                                batch_random_moves_black.push(game_result.random_moves_black);
-                                batch_random_moves_white.push(game_result.random_moves_white);
-                                self.total_random_moves.0 += game_result.random_moves_black as u64;
-                                self.total_random_moves.1 += game_result.random_moves_white as u64;
+                                    // Track stats
+                                    let stone_diff = game_result.final_score;
+                                    batch_stone_diffs.push(stone_diff);
+                                    batch_move_counts.push(game_result.moves_played);
+                                    batch_random_moves_black.push(game_result.random_moves_black);
+                                    batch_random_moves_white.push(game_result.random_moves_white);
+                                    self.total_random_moves.0 +=
+                                        game_result.random_moves_black as u64;
+                                    self.total_random_moves.1 +=
+                                        game_result.random_moves_white as u64;
 
-                                // Accumulate for progress tracking (using sum and count)
-                                self.accumulated_stone_diff_stats.0 += stone_diff as f64;
-                                self.accumulated_stone_diff_stats.1 += 1;
-                                if stone_diff > 0.0 {
-                                    self.accumulated_wins.0 += 1; // Black win
-                                } else if stone_diff < 0.0 {
-                                    self.accumulated_wins.1 += 1; // White win
-                                } else {
-                                    self.accumulated_wins.2 += 1; // Draw
+                                    // Accumulate for progress tracking (using sum and count)
+                                    self.accumulated_stone_diff_stats.0 += stone_diff as f64;
+                                    self.accumulated_stone_diff_stats.1 += 1;
+                                    if stone_diff > 0.0 {
+                                        self.accumulated_wins.0 += 1; // Black win
+                                    } else if stone_diff < 0.0 {
+                                        self.accumulated_wins.1 += 1; // White win
+                                    } else {
+                                        self.accumulated_wins.2 += 1; // Draw
+                                    }
+
+                                    self.convergence.record_game(stone_diff, &[], &[]);
+                                    self.game_count += 1;
                                 }
-
-                                self.convergence.record_game(stone_diff, &[], &[]);
-                                self.game_count += 1;
-                            }
-                            crate::learning::error_handler::PanicCatchResult::Err(e) => {
-                                self.logger.log_warning(&format!("TD update failed: {}", e));
-                                let error = ErrorRecord::new(
-                                    ErrorType::Other,
-                                    self.game_count,
-                                    format!("TD update: {}", e),
-                                );
-                                if self.error_tracker.record_error(error) {
-                                    return self.handle_error_threshold_result();
+                                crate::learning::error_handler::PanicCatchResult::Err(e) => {
+                                    self.logger.log_warning(&format!("TD update failed: {}", e));
+                                    let error = ErrorRecord::new(
+                                        ErrorType::Other,
+                                        self.game_count,
+                                        format!("TD update: {}", e),
+                                    );
+                                    if self.error_tracker.record_error(error) {
+                                        return self.handle_error_threshold_result();
+                                    }
+                                    self.game_count += 1;
                                 }
-                                self.game_count += 1;
-                            }
-                            crate::learning::error_handler::PanicCatchResult::Panic(msg) => {
-                                self.logger
-                                    .log_warning(&format!("Panic caught in TD update: {}", msg));
-                                let error = ErrorRecord::new(
-                                    ErrorType::Panic,
-                                    self.game_count,
-                                    format!("Panic: {}", msg),
-                                );
-                                if self.error_tracker.record_error(error) {
-                                    return self.handle_error_threshold_result();
+                                crate::learning::error_handler::PanicCatchResult::Panic(msg) => {
+                                    self.logger.log_warning(&format!(
+                                        "Panic caught in TD update: {}",
+                                        msg
+                                    ));
+                                    let error = ErrorRecord::new(
+                                        ErrorType::Panic,
+                                        self.game_count,
+                                        format!("Panic: {}", msg),
+                                    );
+                                    if self.error_tracker.record_error(error) {
+                                        return self.handle_error_threshold_result();
+                                    }
+                                    self.game_count += 1;
                                 }
-                                self.game_count += 1;
                             }
                         }
-                    }
-                    Err(e) => {
-                        self.logger.log_warning(&format!("Game failed: {}", e));
-                        let error_type = match &e {
-                            LearningError::Search(_) => ErrorType::Search,
-                            LearningError::EvaluationDivergence(_) => ErrorType::EvalDivergence,
-                            _ => ErrorType::Other,
-                        };
-                        let error = ErrorRecord::new(error_type, self.game_count, e.to_string());
-                        if self.error_tracker.record_error(error) {
-                            return self.handle_error_threshold_result();
+                        Err(e) => {
+                            self.logger.log_warning(&format!("Game failed: {}", e));
+                            let error_type = match &e {
+                                LearningError::Search(_) => ErrorType::Search,
+                                LearningError::EvaluationDivergence(_) => ErrorType::EvalDivergence,
+                                _ => ErrorType::Other,
+                            };
+                            let error =
+                                ErrorRecord::new(error_type, self.game_count, e.to_string());
+                            if self.error_tracker.record_error(error) {
+                                return self.handle_error_threshold_result();
+                            }
                         }
                     }
                 }
             }
-
             // Progress callback (Req 2.4) - trigger when game_count is a multiple of callback_interval
             if self.game_count.is_multiple_of(self.callback_interval)
                 && let Some(ref mut cb) = callback
@@ -2039,6 +2088,7 @@ mod tests {
             log_interval: 5,
             detailed_log_interval: 10,
             search_time_ms: 1, // Very short for testing
+            worker_batch_size: 1,
             lambda: 0.3,
             checkpoint_dir: temp_dir.path().join("checkpoints"),
             log_dir: temp_dir.path().join("logs"),

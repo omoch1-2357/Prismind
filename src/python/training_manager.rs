@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::learning::training_engine::{
     TrainingConfig, TrainingEngine, TrainingProgress, TrainingResult as RustTrainingResult,
+    default_num_threads,
 };
 
 /// Training result returned after training completes or pauses.
@@ -232,6 +233,7 @@ impl PyTrainingManager {
     /// * `callback_interval` - Games between progress callbacks (default: 100)
     /// * `search_time_ms` - Search time per move in milliseconds (default: 15)
     /// * `epsilon` - Exploration rate 0.0-1.0 (default: 0.1)
+    /// * `num_threads` - Worker threads for parallel self-play (default: auto)
     ///
     /// # Returns
     ///
@@ -246,7 +248,7 @@ impl PyTrainingManager {
     ///
     /// - Req 2.1: start_training with target games, checkpoint/callback intervals
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (target_games, checkpoint_interval=10000, callback_interval=100, search_time_ms=15, epsilon=0.1, eval_interval_games=None, eval_sample_games=None))]
+    #[pyo3(signature = (target_games, checkpoint_interval=10000, callback_interval=100, search_time_ms=15, epsilon=0.1, eval_interval_games=None, eval_sample_games=None, num_threads=None, games_per_thread=None))]
     pub fn start_training(
         &mut self,
         py: Python<'_>,
@@ -257,6 +259,8 @@ impl PyTrainingManager {
         epsilon: f64,
         eval_interval_games: Option<u64>,
         eval_sample_games: Option<u64>,
+        num_threads: Option<usize>,
+        games_per_thread: Option<u64>,
     ) -> PyResult<PyTrainingResult> {
         // Validate parameters
         if target_games == 0 {
@@ -276,6 +280,11 @@ impl PyTrainingManager {
         }
 
         // Update config
+        let resolved_threads = num_threads
+            .filter(|&n| n > 0)
+            .unwrap_or_else(default_num_threads);
+        let resolved_worker_batch = games_per_thread.unwrap_or(4).max(1);
+
         let (eval_interval, eval_games) = {
             let mut config = self
                 .config
@@ -283,6 +292,8 @@ impl PyTrainingManager {
                 .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {}", e)))?;
             config.checkpoint_interval = checkpoint_interval;
             config.search_time_ms = search_time_ms;
+            config.num_threads = resolved_threads;
+            config.worker_batch_size = resolved_worker_batch;
             if let Some(interval) = eval_interval_games {
                 config.eval_interval_games = interval;
             }
@@ -314,6 +325,10 @@ impl PyTrainingManager {
         let engine = engine_guard
             .as_mut()
             .ok_or_else(|| PyRuntimeError::new_err("Engine not initialized"))?;
+
+        // Apply thread configuration even when resuming with an existing engine
+        engine.set_num_threads(resolved_threads);
+        engine.set_worker_batch_size(resolved_worker_batch);
 
         // Update engine settings (critical for resume scenarios where config may differ)
         engine.set_callback_interval(callback_interval);
