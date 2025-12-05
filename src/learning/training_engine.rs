@@ -1599,8 +1599,12 @@ impl TrainingEngine {
                     }
                 }
             }
-            // Progress callback (Req 2.4) - trigger when game_count is a multiple of callback_interval
-            if self.game_count.is_multiple_of(self.callback_interval)
+            // Progress callback (Req 2.4) - trigger when we cross a callback boundary
+            // Similar to checkpoint boundary detection, this handles batch processing
+            // where game_count may skip over exact multiples
+            let prev_callback_num = game_count_before_batch / self.callback_interval;
+            let curr_callback_num = self.game_count / self.callback_interval;
+            if prev_callback_num < curr_callback_num
                 && let Some(ref mut cb) = callback
             {
                 let progress = self.get_progress();
