@@ -41,6 +41,16 @@ use crate::learning::score::{stone_diff_to_u16, u16_to_stone_diff};
 /// Default lambda value for trace decay
 pub const DEFAULT_LAMBDA: f32 = 0.3;
 
+/// Maximum absolute TD error value for clipping.
+///
+/// TD errors beyond this threshold are clipped to prevent weight divergence
+/// in late-game stages. A value of 32.0 corresponds to ±32 stone difference,
+/// which is half the maximum possible stone difference (±64) in Othello.
+///
+/// This prevents pattern table entries from saturating at extreme values
+/// (u16 = 0 or 65535) due to large TD updates.
+pub const MAX_TD_ERROR: f32 = 32.0;
+
 /// Number of patterns (14 base patterns)
 pub const NUM_PATTERNS: usize = 14;
 
@@ -236,7 +246,9 @@ impl TDLearner {
 
             // Compute TD error
             // Req 1.3: TD error = target - current evaluation
-            let td_error = target - adjusted_leaf_value;
+            // Clip TD error to prevent weight divergence in late-game stages
+            let td_error_raw = target - adjusted_leaf_value;
+            let td_error = td_error_raw.clamp(-MAX_TD_ERROR, MAX_TD_ERROR);
 
             // Track statistics
             total_td_error += td_error.abs();
@@ -511,8 +523,9 @@ mod tests {
         let final_score = 64.0; // Black wins by 64 (maximum)
         let stats = learner.update(&history, final_score, &mut evaluator, &mut adam);
 
-        // TD error should be |64.0 - 0.0| = 64.0 at the final position
-        assert!((stats.max_td_error - 64.0).abs() < 0.1);
+        // TD error is clipped to MAX_TD_ERROR (32.0) to prevent weight divergence
+        // Raw TD error would be |64.0 - 0.0| = 64.0, but clipped to 32.0
+        assert!((stats.max_td_error - MAX_TD_ERROR).abs() < 0.1);
     }
 
     // ========== Requirement 1.6: Update all 56 pattern instances ==========
