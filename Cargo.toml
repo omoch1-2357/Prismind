@@ -32,6 +32,8 @@ default = []
 pyo3 = ["dep:pyo3", "dep:numpy"]
 
 [profile.release]
+debug = true
+strip = false
 opt-level = 3
 lto = true
 codegen-units = 1
