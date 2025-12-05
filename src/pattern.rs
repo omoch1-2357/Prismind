@@ -42,8 +42,11 @@ pub enum PatternError {
 /// - `k`: セル数（パターンに含まれるマスの数）
 /// - `positions`: セル位置の配列（最大10個、0-63の範囲）
 /// - `rotated_positions`: 4方向の回転済み位置（事前計算）
+/// - `rotated_masks`: 4方向の回転済みビットマスク（PEXT最適化用）
+/// - `pext_to_array_map`: PEXTビット順→配列順の変換マップ
 ///
 /// 事前計算により、パターン抽出時の回転計算オーバーヘッドを削減。
+/// x86_64ではPEXT命令を使用した高速抽出が可能。
 #[repr(C, align(8))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pattern {
@@ -56,6 +59,13 @@ pub struct Pattern {
     /// 4方向の回転済み位置（事前計算）
     /// rotated_positions\[rotation\]\[position_idx\]
     pub rotated_positions: [[u8; 10]; 4],
+    /// 4方向の回転済みビットマスク（PEXT最適化用）
+    /// 各マスクは対応する回転でのパターン位置を1にしたビットマスク
+    pub rotated_masks: [u64; 4],
+    /// PEXT出力ビット位置→配列インデックスの変換マップ
+    /// pext_to_array_map\[rotation\]\[pext_bit_idx\] = array_idx
+    /// PEXTはビット位置順で抽出するため、これで元の配列順に戻す
+    pub pext_to_array_map: [[u8; 10]; 4],
 }
 
 /// CSV読み込み用の中間構造体
@@ -92,12 +102,42 @@ impl Pattern {
             pos_array[i] = pos;
         }
 
-        // 4方向の回転済み位置を事前計算
+        // 4方向の回転済み位置、ビットマスク、PEXT→配列マップを事前計算
         let mut rotated_positions = [[0u8; 10]; 4];
+        let mut rotated_masks = [0u64; 4];
+        let mut pext_to_array_map = [[0u8; 10]; 4];
         let len = k as usize;
+
         for (rotation, rotated) in rotated_positions.iter_mut().enumerate() {
+            let mut mask = 0u64;
+
+            // 回転後の位置を計算
             for (i, &pos) in pos_array.iter().enumerate().take(len) {
-                rotated[i] = compute_rotated_position(pos, rotation);
+                let rotated_pos = compute_rotated_position(pos, rotation);
+                rotated[i] = rotated_pos;
+                mask |= 1u64 << rotated_pos;
+            }
+            rotated_masks[rotation] = mask;
+
+            // PEXT出力ビット位置→配列インデックスのマップを作成
+            // PEXTはビット位置の昇順（LSB→MSB）で出力する
+            // 例: positions=[9,1,18] → PEXT出力順は[1,9,18]のビット値
+            // pext_to_array_map[0]=1 (PEXTのbit0はpos1、配列index1)
+            // pext_to_array_map[1]=0 (PEXTのbit1はpos9、配列index0)
+            // pext_to_array_map[2]=2 (PEXTのbit2はpos18、配列index2)
+
+            // 位置とインデックスのペアを作成し、位置順にソート
+            let mut pos_idx_pairs: Vec<(u8, u8)> = rotated
+                .iter()
+                .take(len)
+                .enumerate()
+                .map(|(idx, &pos)| (pos, idx as u8))
+                .collect();
+            pos_idx_pairs.sort_by_key(|(pos, _)| *pos);
+
+            // ソート後のインデックスがPEXT出力順→配列順のマップ
+            for (pext_bit_idx, (_, array_idx)) in pos_idx_pairs.iter().enumerate() {
+                pext_to_array_map[rotation][pext_bit_idx] = *array_idx;
             }
         }
 
@@ -106,6 +146,8 @@ impl Pattern {
             k,
             positions: pos_array,
             rotated_positions,
+            rotated_masks,
+            pext_to_array_map,
         })
     }
 }
@@ -349,6 +391,7 @@ pub fn extract_all_patterns(board: &crate::board::BitBoard, patterns: &[Pattern]
 /// 可変バッファにパターンインデックスを書き込む
 ///
 /// 事前計算済みの回転位置を使用して高速化。
+/// x86_64でBMI2が利用可能な場合、PEXT命令による高速実装を使用。
 #[inline]
 pub fn extract_all_patterns_into(
     board: &crate::board::BitBoard,
@@ -361,6 +404,28 @@ pub fn extract_all_patterns_into(
     let black = board.black;
     let white = board.white_mask();
 
+    // x86_64でBMI2が利用可能な場合、PEXT命令による高速実装を使用
+    // pext_to_array_mapによりPEXTビット順→配列順の変換を行う
+    #[cfg(target_arch = "x86_64")]
+    {
+        if crate::x86_64::has_bmi2() {
+            crate::x86_64::extract_all_patterns_pext_safe(black, white, patterns, out);
+            return;
+        }
+    }
+
+    // フォールバック: スカラー実装（ARM64または古いx86_64 CPU用）
+    extract_all_patterns_scalar(black, white, patterns, out);
+}
+
+/// スカラー版のパターン抽出（フォールバック用）
+#[inline]
+fn extract_all_patterns_scalar(
+    black: u64,
+    white: u64,
+    patterns: &[Pattern],
+    out: &mut [usize; 56],
+) {
     // 各回転について処理（事前計算済み位置を使用）
     for rotation in 0..4 {
         let swap_colors = rotation % 2 == 1;
@@ -532,11 +597,18 @@ mod tests {
     #[test]
     fn test_pattern_struct_size() {
         // Pattern構造体のサイズを確認
-        // 回転済み位置のプリコンピュートにより56バイトに増加（速度向上とのトレードオフ）
+        // pext_to_array_map追加により128バイト
+        // - id: 1 byte
+        // - k: 1 byte
+        // - positions: 10 bytes
+        // - rotated_positions: 40 bytes (4 rotations × 10 positions)
+        // - rotated_masks: 32 bytes (4 rotations × 8 bytes)
+        // - pext_to_array_map: 40 bytes (4 rotations × 10 indices)
+        // - padding: 4 bytes (alignment)
         assert_eq!(
             std::mem::size_of::<Pattern>(),
-            56,
-            "Pattern should be exactly 56 bytes (with precomputed rotations)"
+            128,
+            "Pattern should be exactly 128 bytes (with pext_to_array_map)"
         );
     }
 
@@ -827,9 +899,11 @@ P13,4,A1 B1 C1 D1
         println!("✓ 6.4: Coordinate to bit position conversion works");
 
         // Requirement 6.6: 固定長配列でヒープアロケーション回避
-        // 回転済み位置のプリコンピュートにより56バイトに増加
-        assert_eq!(std::mem::size_of::<Pattern>(), 56);
-        println!("✓ 6.6 & 13.6: Fixed-size array with precomputed rotations, no heap allocation");
+        // pext_to_array_map追加により128バイト
+        assert_eq!(std::mem::size_of::<Pattern>(), 128);
+        println!(
+            "✓ 6.6 & 13.6: Fixed-size array with precomputed rotations and masks, no heap allocation"
+        );
 
         println!("=== All Task 5.1 requirements verified ===");
     }
@@ -1085,12 +1159,12 @@ X01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
         assert_eq!(pattern1.k, pattern2.k);
         assert_eq!(pattern1.positions, pattern2.positions);
 
-        // メモリサイズが固定であることを確認
-        assert_eq!(std::mem::size_of::<Pattern>(), 24);
+        // メモリサイズが固定であることを確認（pext_to_array_map追加により128バイト）
+        assert_eq!(std::mem::size_of::<Pattern>(), 128);
 
         // スタック配置の確認（ポインタのサイズではなく構造体自体のサイズ）
         let patterns = [pattern1, pattern2, pattern3];
-        assert_eq!(std::mem::size_of_val(&patterns), 24 * 3);
+        assert_eq!(std::mem::size_of_val(&patterns), 128 * 3);
     }
 
     #[test]
@@ -1128,7 +1202,8 @@ X01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
         println!("✓ NFR-4: Error handling for file not found");
 
         // Memory layout verification
-        assert_eq!(std::mem::size_of::<Pattern>(), 24);
+        // Size increased to 128 bytes with pext_to_array_map
+        assert_eq!(std::mem::size_of::<Pattern>(), 128);
         assert_eq!(std::mem::align_of::<Pattern>(), 8);
         println!("✓ NFR-4, 13.6: Memory layout verified (no heap allocation)");
 

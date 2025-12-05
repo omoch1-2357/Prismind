@@ -772,6 +772,7 @@ dependencies = [
  "flate2",
  "log",
  "numpy",
+ "once_cell",
  "pyo3",
  "rand",
  "rayon",

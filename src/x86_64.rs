@@ -2,6 +2,7 @@
 //!
 //! このモジュールはx86-64アーキテクチャ専用の最適化を集約する:
 //! - SSE/AVX SIMD命令による並列処理
+//! - BMI2 PEXT命令によるパターン抽出の高速化
 //! - プリフェッチによるキャッシュ最適化
 //!
 //! # プラットフォームサポート
@@ -11,6 +12,383 @@
 
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
+
+// ============================================================================
+// PEXT-based Pattern Extraction (BMI2)
+// ============================================================================
+
+/// k=10用の3進数ルックアップテーブル（1024 x 1024 = 1MB）
+/// `TERNARY_LUT_K10\[black_bits\]\[white_bits\]` = 3進数インデックス
+///
+/// 事前計算により、ループなしで3進数インデックスを取得可能。
+/// メモリ使用量は大きいが、キャッシュに乗れば非常に高速。
+#[cfg(target_arch = "x86_64")]
+static TERNARY_LUT_K10: once_cell::sync::Lazy<Box<[[u32; 1024]; 1024]>> =
+    once_cell::sync::Lazy::new(|| {
+        let mut lut = Box::new([[0u32; 1024]; 1024]);
+        for black_bits in 0..1024usize {
+            for white_bits in 0..1024usize {
+                let mut index = 0u32;
+                let mut power_of_3 = 1u32;
+                for bit_pos in 0..10 {
+                    let is_black = ((black_bits >> bit_pos) & 1) as u32;
+                    let is_white = ((white_bits >> bit_pos) & 1) as u32;
+                    // 0=empty, 1=black, 2=white
+                    let cell_value = is_black + is_white * 2;
+                    index += cell_value * power_of_3;
+                    power_of_3 *= 3;
+                }
+                lut[black_bits][white_bits] = index;
+            }
+        }
+        lut
+    });
+
+/// k=8用の3進数ルックアップテーブル（256 x 256 = 64KB）
+#[cfg(target_arch = "x86_64")]
+static TERNARY_LUT_K8: once_cell::sync::Lazy<Box<[[u16; 256]; 256]>> =
+    once_cell::sync::Lazy::new(|| {
+        let mut lut = Box::new([[0u16; 256]; 256]);
+        for black_bits in 0..256usize {
+            for white_bits in 0..256usize {
+                let mut index = 0u16;
+                let mut power_of_3 = 1u16;
+                for bit_pos in 0..8 {
+                    let is_black = ((black_bits >> bit_pos) & 1) as u16;
+                    let is_white = ((white_bits >> bit_pos) & 1) as u16;
+                    let cell_value = is_black + is_white * 2;
+                    index += cell_value * power_of_3;
+                    power_of_3 *= 3;
+                }
+                lut[black_bits][white_bits] = index;
+            }
+        }
+        lut
+    });
+
+/// k=7用の3進数ルックアップテーブル（128 x 128 = 16KB）
+#[cfg(target_arch = "x86_64")]
+static TERNARY_LUT_K7: once_cell::sync::Lazy<Box<[[u16; 128]; 128]>> =
+    once_cell::sync::Lazy::new(|| {
+        let mut lut = Box::new([[0u16; 128]; 128]);
+        for black_bits in 0..128usize {
+            for white_bits in 0..128usize {
+                let mut index = 0u16;
+                let mut power_of_3 = 1u16;
+                for bit_pos in 0..7 {
+                    let is_black = ((black_bits >> bit_pos) & 1) as u16;
+                    let is_white = ((white_bits >> bit_pos) & 1) as u16;
+                    let cell_value = is_black + is_white * 2;
+                    index += cell_value * power_of_3;
+                    power_of_3 *= 3;
+                }
+                lut[black_bits][white_bits] = index;
+            }
+        }
+        lut
+    });
+
+/// k=6用の3進数ルックアップテーブル（64 x 64 = 4KB）
+#[cfg(target_arch = "x86_64")]
+static TERNARY_LUT_K6: once_cell::sync::Lazy<Box<[[u16; 64]; 64]>> =
+    once_cell::sync::Lazy::new(|| {
+        let mut lut = Box::new([[0u16; 64]; 64]);
+        for black_bits in 0..64usize {
+            for white_bits in 0..64usize {
+                let mut index = 0u16;
+                let mut power_of_3 = 1u16;
+                for bit_pos in 0..6 {
+                    let is_black = ((black_bits >> bit_pos) & 1) as u16;
+                    let is_white = ((white_bits >> bit_pos) & 1) as u16;
+                    let cell_value = is_black + is_white * 2;
+                    index += cell_value * power_of_3;
+                    power_of_3 *= 3;
+                }
+                lut[black_bits][white_bits] = index;
+            }
+        }
+        lut
+    });
+
+/// k=5用の3進数ルックアップテーブル（32 x 32 = 1KB）
+#[cfg(target_arch = "x86_64")]
+static TERNARY_LUT_K5: once_cell::sync::Lazy<Box<[[u8; 32]; 32]>> =
+    once_cell::sync::Lazy::new(|| {
+        let mut lut = Box::new([[0u8; 32]; 32]);
+        for black_bits in 0..32usize {
+            for white_bits in 0..32usize {
+                let mut index = 0u8;
+                let mut power_of_3 = 1u8;
+                for bit_pos in 0..5 {
+                    let is_black = ((black_bits >> bit_pos) & 1) as u8;
+                    let is_white = ((white_bits >> bit_pos) & 1) as u8;
+                    let cell_value = is_black + is_white * 2;
+                    index += cell_value * power_of_3;
+                    power_of_3 *= 3;
+                }
+                lut[black_bits][white_bits] = index;
+            }
+        }
+        lut
+    });
+
+/// PEXTの出力ビットをpext_to_array_mapに従って並べ替え
+///
+/// PEXTはビット位置順（LSB→MSB）でビットを出力するが、
+/// 3進数計算には配列順序が必要。この関数でビットを正しい順序に並べ替える。
+#[inline]
+fn permute_bits(pext_bits: usize, perm: &[u8; 10], k: usize) -> usize {
+    let mut result = 0usize;
+    for (pext_bit_idx, &array_idx) in perm.iter().enumerate().take(k) {
+        let bit = (pext_bits >> pext_bit_idx) & 1;
+        result |= bit << (array_idx as usize);
+    }
+    result
+}
+
+/// PEXT命令を使用して3進数インデックスを抽出（k=10用）
+///
+/// BMI2のPEXT命令でビット抽出を一括処理し、LUTで3進数変換。
+/// Intel Haswell以降で3サイクルのレイテンシ。
+///
+/// # Safety
+///
+/// BMI2命令を使用するため、対応CPUでのみ実行可能。
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "bmi2")]
+#[inline]
+pub unsafe fn extract_index_pext_k10(
+    black: u64,
+    white: u64,
+    mask: u64,
+    perm: &[u8; 10],
+    swap_colors: bool,
+) -> usize {
+    let black_pext = _pext_u64(black, mask) as usize;
+    let white_pext = _pext_u64(white, mask) as usize;
+
+    // PEXTビット順→配列順に並べ替え
+    let black_bits = permute_bits(black_pext, perm, 10);
+    let white_bits = permute_bits(white_pext, perm, 10);
+
+    if swap_colors {
+        TERNARY_LUT_K10[white_bits][black_bits] as usize
+    } else {
+        TERNARY_LUT_K10[black_bits][white_bits] as usize
+    }
+}
+
+/// PEXT命令を使用して3進数インデックスを抽出（k=8用）
+///
+/// # Safety
+///
+/// BMI2命令を使用するため、対応CPUでのみ実行可能。
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "bmi2")]
+#[inline]
+pub unsafe fn extract_index_pext_k8(
+    black: u64,
+    white: u64,
+    mask: u64,
+    perm: &[u8; 10],
+    swap_colors: bool,
+) -> usize {
+    let black_pext = _pext_u64(black, mask) as usize;
+    let white_pext = _pext_u64(white, mask) as usize;
+
+    let black_bits = permute_bits(black_pext, perm, 8);
+    let white_bits = permute_bits(white_pext, perm, 8);
+
+    if swap_colors {
+        TERNARY_LUT_K8[white_bits][black_bits] as usize
+    } else {
+        TERNARY_LUT_K8[black_bits][white_bits] as usize
+    }
+}
+
+/// PEXT命令を使用して3進数インデックスを抽出（k=7用）
+///
+/// # Safety
+///
+/// BMI2命令を使用するため、対応CPUでのみ実行可能。
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "bmi2")]
+#[inline]
+pub unsafe fn extract_index_pext_k7(
+    black: u64,
+    white: u64,
+    mask: u64,
+    perm: &[u8; 10],
+    swap_colors: bool,
+) -> usize {
+    let black_pext = _pext_u64(black, mask) as usize;
+    let white_pext = _pext_u64(white, mask) as usize;
+
+    let black_bits = permute_bits(black_pext, perm, 7);
+    let white_bits = permute_bits(white_pext, perm, 7);
+
+    if swap_colors {
+        TERNARY_LUT_K7[white_bits][black_bits] as usize
+    } else {
+        TERNARY_LUT_K7[black_bits][white_bits] as usize
+    }
+}
+
+/// PEXT命令を使用して3進数インデックスを抽出（k=6用）
+///
+/// # Safety
+///
+/// BMI2命令を使用するため、対応CPUでのみ実行可能。
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "bmi2")]
+#[inline]
+pub unsafe fn extract_index_pext_k6(
+    black: u64,
+    white: u64,
+    mask: u64,
+    perm: &[u8; 10],
+    swap_colors: bool,
+) -> usize {
+    let black_pext = _pext_u64(black, mask) as usize;
+    let white_pext = _pext_u64(white, mask) as usize;
+
+    let black_bits = permute_bits(black_pext, perm, 6);
+    let white_bits = permute_bits(white_pext, perm, 6);
+
+    if swap_colors {
+        TERNARY_LUT_K6[white_bits][black_bits] as usize
+    } else {
+        TERNARY_LUT_K6[black_bits][white_bits] as usize
+    }
+}
+
+/// PEXT命令を使用して3進数インデックスを抽出（k=5用）
+///
+/// # Safety
+///
+/// BMI2命令を使用するため、対応CPUでのみ実行可能。
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "bmi2")]
+#[inline]
+pub unsafe fn extract_index_pext_k5(
+    black: u64,
+    white: u64,
+    mask: u64,
+    perm: &[u8; 10],
+    swap_colors: bool,
+) -> usize {
+    let black_pext = _pext_u64(black, mask) as usize;
+    let white_pext = _pext_u64(white, mask) as usize;
+
+    let black_bits = permute_bits(black_pext, perm, 5);
+    let white_bits = permute_bits(white_pext, perm, 5);
+
+    if swap_colors {
+        TERNARY_LUT_K5[white_bits][black_bits] as usize
+    } else {
+        TERNARY_LUT_K5[black_bits][white_bits] as usize
+    }
+}
+
+/// BMI2が利用可能かどうかをランタイムで判定
+#[cfg(target_arch = "x86_64")]
+#[inline]
+pub fn has_bmi2() -> bool {
+    is_x86_feature_detected!("bmi2")
+}
+
+/// 全パターンインデックスをPEXT命令で抽出（安全なラッパー）
+///
+/// BMI2が利用可能な場合のみ呼び出すこと。
+/// 内部でunsafe関数を呼び出す。
+#[cfg(target_arch = "x86_64")]
+#[inline]
+pub fn extract_all_patterns_pext_safe(
+    black: u64,
+    white: u64,
+    patterns: &[crate::pattern::Pattern],
+    out: &mut [usize; 56],
+) {
+    debug_assert!(has_bmi2(), "BMI2 must be available");
+    // Safety: has_bmi2()で事前チェック済み
+    unsafe {
+        extract_all_patterns_pext(black, white, patterns, out);
+    }
+}
+
+/// 全パターンインデックスをPEXT命令で抽出（BMI2対応CPU用）
+///
+/// 14パターン × 4回転 = 56個のインデックスを高速抽出。
+/// BMI2非対応環境では呼び出し禁止。
+///
+/// # Safety
+///
+/// BMI2命令を使用するため、`has_bmi2()`がtrueの場合のみ呼び出し可能。
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "bmi2")]
+pub unsafe fn extract_all_patterns_pext(
+    black: u64,
+    white: u64,
+    patterns: &[crate::pattern::Pattern],
+    out: &mut [usize; 56],
+) {
+    debug_assert_eq!(patterns.len(), 14);
+
+    // パターンサイズ: P01-P04=10, P05-P08=8, P09-P10=7, P11-P12=6, P13-P14=5
+    for rotation in 0..4 {
+        let swap_colors = rotation % 2 == 1;
+        let base_idx = rotation * 14;
+
+        // P01-P04 (k=10)
+        for pattern_idx in 0..4 {
+            let pattern = &patterns[pattern_idx];
+            let mask = pattern.rotated_masks[rotation];
+            let perm = &pattern.pext_to_array_map[rotation];
+            out[base_idx + pattern_idx] =
+                unsafe { extract_index_pext_k10(black, white, mask, perm, swap_colors) };
+        }
+
+        // P05-P08 (k=8)
+        for pattern_idx in 4..8 {
+            let pattern = &patterns[pattern_idx];
+            let mask = pattern.rotated_masks[rotation];
+            let perm = &pattern.pext_to_array_map[rotation];
+            out[base_idx + pattern_idx] =
+                unsafe { extract_index_pext_k8(black, white, mask, perm, swap_colors) };
+        }
+
+        // P09-P10 (k=7)
+        for pattern_idx in 8..10 {
+            let pattern = &patterns[pattern_idx];
+            let mask = pattern.rotated_masks[rotation];
+            let perm = &pattern.pext_to_array_map[rotation];
+            out[base_idx + pattern_idx] =
+                unsafe { extract_index_pext_k7(black, white, mask, perm, swap_colors) };
+        }
+
+        // P11-P12 (k=6)
+        for pattern_idx in 10..12 {
+            let pattern = &patterns[pattern_idx];
+            let mask = pattern.rotated_masks[rotation];
+            let perm = &pattern.pext_to_array_map[rotation];
+            out[base_idx + pattern_idx] =
+                unsafe { extract_index_pext_k6(black, white, mask, perm, swap_colors) };
+        }
+
+        // P13-P14 (k=5)
+        for pattern_idx in 12..14 {
+            let pattern = &patterns[pattern_idx];
+            let mask = pattern.rotated_masks[rotation];
+            let perm = &pattern.pext_to_array_map[rotation];
+            out[base_idx + pattern_idx] =
+                unsafe { extract_index_pext_k5(black, white, mask, perm, swap_colors) };
+        }
+    }
+}
+
+// ============================================================================
+// SIMD Score Conversion
+// ============================================================================
 
 /// SSE4.1を使用してu16型の評価値8個をf32型の石差に一括変換
 ///

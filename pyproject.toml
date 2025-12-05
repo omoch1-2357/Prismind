@@ -44,7 +44,7 @@ module-name = "prismind._prismind"
 # Enable stable ABI for better cross-version compatibility
 python-packages = []
 
-strip = false   
+strip = false
 
 # ARM64 cross-compilation notes:
 # Build for ARM64 Linux: maturin build --release --target aarch64-unknown-linux-gnu

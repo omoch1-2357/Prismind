@@ -773,7 +773,6 @@ impl Evaluator {
         crate::pattern::extract_all_patterns_into(board, patterns, &mut indices);
 
         // 整数で合計（u16値を直接加算）
-        // u16の中央値32768を引く操作は最後に行う
         let mut sum_u32 = 0u32;
 
         // ステージデータへの参照を取得
@@ -783,8 +782,6 @@ impl Evaluator {
         // 56個のインデックスを処理
         for rotation in 0..4 {
             let base_idx = rotation * 14;
-
-            // 14パターンをループアンローリング風に処理
             for pattern_id in 0..14 {
                 let index = indices[base_idx + pattern_id];
                 let offset = offsets[pattern_id] + index;
@@ -793,9 +790,7 @@ impl Evaluator {
         }
 
         // 最後に1回だけf32変換
-        // sum = (sum_u32 - 56 * 32768) / 256
-        // = sum_u32 / 256 - 56 * 128
-        // = sum_u32 / 256 - 7168
+        // sum = (sum_u32 - 56 * 32768) / 256 = sum_u32 / 256 - 7168
         let sum_f32 = (sum_u32 as f32) / 256.0 - 7168.0;
 
         // 現在の手番が白の場合は符号を反転
