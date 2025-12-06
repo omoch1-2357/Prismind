@@ -234,10 +234,13 @@ impl TDLearner {
                 self.lambda * final_score + (1.0 - self.lambda) * next_value
             };
 
-            // Get the leaf value, adjusted for side to move
-            // Req 1.8: Account for side-to-move
-            // If it's White's turn, the evaluation was from White's perspective
-            // We need to convert to Black's perspective (positive = Black advantage)
+            // Get the leaf value - already in current player's perspective from Evaluator.evaluate()
+            // which negates for white turns. We need to convert to Black's perspective for consistent
+            // TD learning (positive = Black advantage).
+            // Note: is_black_turn is the turn BEFORE the move was made (when patterns were extracted)
+            // The leaf_value from search/static eval is from that player's perspective.
+            // If it was Black's turn: leaf_value is Black's perspective (positive = good for Black) - keep as is
+            // If it was White's turn: leaf_value is White's perspective (positive = good for White) - negate
             let adjusted_leaf_value = if record.is_black_turn {
                 record.leaf_value
             } else {
@@ -272,6 +275,12 @@ impl TDLearner {
             // Update all 56 pattern instances
             // Req 1.6: Update all 56 pattern instances per position
             for rotation in 0..NUM_ROTATIONS {
+                // CRITICAL: Rotations 1 (90°) and 3 (270°) have swap_colors=true
+                // meaning the pattern index was extracted with black/white swapped.
+                // Since td_error is in black's perspective, we must negate the gradient
+                // for these rotations to update in the correct direction.
+                let swap_colors = rotation % 2 == 1;
+
                 for pattern_id in 0..NUM_PATTERNS {
                     let idx = rotation * NUM_PATTERNS + pattern_id;
                     let pattern_index = record.pattern_indices[idx];
@@ -280,9 +289,14 @@ impl TDLearner {
                     // Get eligibility trace for this entry (now includes current position)
                     let eligibility = self.trace.get(pattern_id, stage, pattern_index);
 
-                    // Compute gradient
+                    // Compute gradient with sign correction for swapped rotations
                     // Req 2.4: gradient = td_error * eligibility_trace
-                    let gradient = td_error * eligibility;
+                    let base_gradient = td_error * eligibility;
+                    let gradient = if swap_colors {
+                        -base_gradient
+                    } else {
+                        base_gradient
+                    };
 
                     // Only update if there's a non-zero gradient
                     if gradient.abs() > 1e-10 {
