@@ -62,6 +62,8 @@ use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use chrono::Local;
+
 use crc32fast::Hasher as Crc32Hasher;
 use flate2::Compression;
 use flate2::read::GzDecoder;
@@ -408,7 +410,7 @@ impl CheckpointManager {
 
     /// Generate checkpoint filename for a given game count.
     ///
-    /// Format: checkpoint_NNNNNN.bin (6-digit zero-padded)
+    /// Format: checkpoint_YYYYMMDD_HHMMSS_NNNNNN.bin
     ///
     /// # Arguments
     ///
@@ -416,9 +418,10 @@ impl CheckpointManager {
     ///
     /// # Returns
     ///
-    /// Filename string.
+    /// Filename string with timestamp.
     pub fn checkpoint_filename(game_count: u64) -> String {
-        format!("checkpoint_{:06}.bin", game_count)
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+        format!("checkpoint_{}_{:06}.bin", timestamp, game_count)
     }
 
     /// Get full path for a checkpoint file.
@@ -743,8 +746,17 @@ impl CheckpointManager {
     /// Game count if filename matches pattern, None otherwise.
     fn parse_checkpoint_filename(filename: &str) -> Option<u64> {
         if filename.starts_with("checkpoint_") && filename.ends_with(".bin") {
-            let num_str = &filename[11..filename.len() - 4];
-            num_str.parse().ok()
+            // Try new format: checkpoint_YYYYMMDD_HHMMSS_NNNNNN.bin
+            // or legacy format: checkpoint_NNNNNN.bin
+            let inner = &filename[11..filename.len() - 4];
+            // New format has underscores: YYYYMMDD_HHMMSS_NNNNNN
+            if let Some(last_underscore) = inner.rfind('_') {
+                // Try parsing the part after the last underscore as game count
+                inner[last_underscore + 1..].parse().ok()
+            } else {
+                // Legacy format: just NNNNNN
+                inner.parse().ok()
+            }
         } else {
             None
         }
@@ -1099,8 +1111,11 @@ impl EnhancedCheckpointManager {
     }
 
     /// Generate checkpoint filename for a given game count.
+    ///
+    /// Format: checkpoint_YYYYMMDD_HHMMSS_NNNNNN.bin
     pub fn checkpoint_filename(game_count: u64) -> String {
-        format!("checkpoint_{:06}.bin", game_count)
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+        format!("checkpoint_{}_{:06}.bin", timestamp, game_count)
     }
 
     /// Get full path for a checkpoint file.
@@ -1692,26 +1707,22 @@ mod tests {
 
     #[test]
     fn test_checkpoint_filename_format() {
-        assert_eq!(
-            CheckpointManager::checkpoint_filename(0),
-            "checkpoint_000000.bin"
-        );
-        assert_eq!(
-            CheckpointManager::checkpoint_filename(100000),
-            "checkpoint_100000.bin"
-        );
-        assert_eq!(
-            CheckpointManager::checkpoint_filename(1000000),
-            "checkpoint_1000000.bin"
-        );
-        assert_eq!(
-            CheckpointManager::checkpoint_filename(999999),
-            "checkpoint_999999.bin"
-        );
+        // New format: checkpoint_YYYYMMDD_HHMMSS_NNNNNN.bin
+        let filename = CheckpointManager::checkpoint_filename(0);
+        assert!(filename.starts_with("checkpoint_"));
+        assert!(filename.ends_with("_000000.bin"));
+        assert!(filename.len() > 20); // Has timestamp
+
+        let filename = CheckpointManager::checkpoint_filename(100000);
+        assert!(filename.ends_with("_100000.bin"));
+
+        let filename = CheckpointManager::checkpoint_filename(1000000);
+        assert!(filename.ends_with("_1000000.bin"));
     }
 
     #[test]
     fn test_parse_checkpoint_filename() {
+        // Legacy format
         assert_eq!(
             CheckpointManager::parse_checkpoint_filename("checkpoint_000000.bin"),
             Some(0)
@@ -1724,6 +1735,16 @@ mod tests {
             CheckpointManager::parse_checkpoint_filename("checkpoint_999999.bin"),
             Some(999999)
         );
+        // New format with timestamp
+        assert_eq!(
+            CheckpointManager::parse_checkpoint_filename("checkpoint_20251206_115829_100000.bin"),
+            Some(100000)
+        );
+        assert_eq!(
+            CheckpointManager::parse_checkpoint_filename("checkpoint_20251206_235959_000000.bin"),
+            Some(0)
+        );
+        // Invalid
         assert_eq!(
             CheckpointManager::parse_checkpoint_filename("invalid.bin"),
             None
@@ -1749,10 +1770,10 @@ mod tests {
         let path = manager.save(0, &table, &adam, &patterns, 0).unwrap();
 
         assert!(path.exists());
-        assert_eq!(
-            path.file_name().unwrap().to_str().unwrap(),
-            "checkpoint_000000.bin"
-        );
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        // New format: checkpoint_YYYYMMDD_HHMMSS_000000.bin
+        assert!(filename.starts_with("checkpoint_"));
+        assert!(filename.ends_with("_000000.bin"));
     }
 
     // ========== Requirement 6.2, 6.3, 6.4, 6.5: Save State ==========
@@ -1824,10 +1845,9 @@ mod tests {
         adam.step();
 
         // Save and reload
-        manager
+        let path = manager
             .save(200000, &table, &adam, &patterns, 7200)
             .unwrap();
-        let path = manager.checkpoint_path(200000);
         let (loaded_table, loaded_adam, meta) = manager.load(&path, &patterns).unwrap();
 
         // Verify all table values
@@ -2102,12 +2122,11 @@ mod tests {
         // Req 6.5: Save metadata
         println!("  6.5: Save metadata (game count, elapsed time, timestamp)");
 
-        // Req 6.6: Filename format
-        assert_eq!(
-            CheckpointManager::checkpoint_filename(100000),
-            "checkpoint_100000.bin"
-        );
-        println!("  6.6: Filename format checkpoint_NNNNNN.bin");
+        // Req 6.6: Filename format (checkpoint_YYYYMMDD_HHMMSS_NNNNNN.bin)
+        let filename = CheckpointManager::checkpoint_filename(100000);
+        assert!(filename.starts_with("checkpoint_"));
+        assert!(filename.ends_with("_100000.bin"));
+        println!("  6.6: Filename format checkpoint_YYYYMMDD_HHMMSS_NNNNNN.bin");
 
         // Save checkpoint
         let path = manager

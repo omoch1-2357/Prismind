@@ -275,12 +275,6 @@ impl TDLearner {
             // Update all 56 pattern instances
             // Req 1.6: Update all 56 pattern instances per position
             for rotation in 0..NUM_ROTATIONS {
-                // CRITICAL: Rotations 1 (90°) and 3 (270°) have swap_colors=true
-                // meaning the pattern index was extracted with black/white swapped.
-                // Since td_error is in black's perspective, we must negate the gradient
-                // for these rotations to update in the correct direction.
-                let swap_colors = rotation % 2 == 1;
-
                 for pattern_id in 0..NUM_PATTERNS {
                     let idx = rotation * NUM_PATTERNS + pattern_id;
                     let pattern_index = record.pattern_indices[idx];
@@ -289,14 +283,9 @@ impl TDLearner {
                     // Get eligibility trace for this entry (now includes current position)
                     let eligibility = self.trace.get(pattern_id, stage, pattern_index);
 
-                    // Compute gradient with sign correction for swapped rotations
+                    // Compute gradient
                     // Req 2.4: gradient = td_error * eligibility_trace
-                    let base_gradient = td_error * eligibility;
-                    let gradient = if swap_colors {
-                        -base_gradient
-                    } else {
-                        base_gradient
-                    };
+                    let gradient = td_error * eligibility;
 
                     // Only update if there's a non-zero gradient
                     if gradient.abs() > 1e-10 {
