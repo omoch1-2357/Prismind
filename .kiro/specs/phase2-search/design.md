@@ -728,7 +728,7 @@ fn is_x_square(pos: u8) -> bool {
 fn is_edge(pos: u8) -> bool {
     if is_corner(pos) { return false; }
     let row = pos / 8;
-    let col = pos % 8;
+    let col = pos & 7;
     row == 0 || row == 7 || col == 0 || col == 7
 }
 ```

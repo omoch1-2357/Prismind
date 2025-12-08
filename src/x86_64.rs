@@ -137,14 +137,70 @@ static TERNARY_LUT_K5: once_cell::sync::Lazy<Box<[[u8; 32]; 32]>> =
 ///
 /// PEXTはビット位置順（LSB→MSB）でビットを出力するが、
 /// 3進数計算には配列順序が必要。この関数でビットを正しい順序に並べ替える。
-#[inline]
-fn permute_bits(pext_bits: usize, perm: &[u8; 10], k: usize) -> usize {
-    let mut result = 0usize;
-    for (pext_bit_idx, &array_idx) in perm.iter().enumerate().take(k) {
-        let bit = (pext_bits >> pext_bit_idx) & 1;
-        result |= bit << (array_idx as usize);
-    }
-    result
+#[inline(always)]
+fn permute_bits_k10(pext_bits: usize, perm: &[u8; 10]) -> usize {
+    let mut r = 0usize;
+    r |= (pext_bits & 1) << (perm[0] as usize);
+    r |= ((pext_bits >> 1) & 1) << (perm[1] as usize);
+    r |= ((pext_bits >> 2) & 1) << (perm[2] as usize);
+    r |= ((pext_bits >> 3) & 1) << (perm[3] as usize);
+    r |= ((pext_bits >> 4) & 1) << (perm[4] as usize);
+    r |= ((pext_bits >> 5) & 1) << (perm[5] as usize);
+    r |= ((pext_bits >> 6) & 1) << (perm[6] as usize);
+    r |= ((pext_bits >> 7) & 1) << (perm[7] as usize);
+    r |= ((pext_bits >> 8) & 1) << (perm[8] as usize);
+    r |= ((pext_bits >> 9) & 1) << (perm[9] as usize);
+    r
+}
+
+#[inline(always)]
+fn permute_bits_k8(pext_bits: usize, perm: &[u8; 10]) -> usize {
+    let mut r = 0usize;
+    r |= (pext_bits & 1) << (perm[0] as usize);
+    r |= ((pext_bits >> 1) & 1) << (perm[1] as usize);
+    r |= ((pext_bits >> 2) & 1) << (perm[2] as usize);
+    r |= ((pext_bits >> 3) & 1) << (perm[3] as usize);
+    r |= ((pext_bits >> 4) & 1) << (perm[4] as usize);
+    r |= ((pext_bits >> 5) & 1) << (perm[5] as usize);
+    r |= ((pext_bits >> 6) & 1) << (perm[6] as usize);
+    r |= ((pext_bits >> 7) & 1) << (perm[7] as usize);
+    r
+}
+
+#[inline(always)]
+fn permute_bits_k7(pext_bits: usize, perm: &[u8; 10]) -> usize {
+    let mut r = 0usize;
+    r |= (pext_bits & 1) << (perm[0] as usize);
+    r |= ((pext_bits >> 1) & 1) << (perm[1] as usize);
+    r |= ((pext_bits >> 2) & 1) << (perm[2] as usize);
+    r |= ((pext_bits >> 3) & 1) << (perm[3] as usize);
+    r |= ((pext_bits >> 4) & 1) << (perm[4] as usize);
+    r |= ((pext_bits >> 5) & 1) << (perm[5] as usize);
+    r |= ((pext_bits >> 6) & 1) << (perm[6] as usize);
+    r
+}
+
+#[inline(always)]
+fn permute_bits_k6(pext_bits: usize, perm: &[u8; 10]) -> usize {
+    let mut r = 0usize;
+    r |= (pext_bits & 1) << (perm[0] as usize);
+    r |= ((pext_bits >> 1) & 1) << (perm[1] as usize);
+    r |= ((pext_bits >> 2) & 1) << (perm[2] as usize);
+    r |= ((pext_bits >> 3) & 1) << (perm[3] as usize);
+    r |= ((pext_bits >> 4) & 1) << (perm[4] as usize);
+    r |= ((pext_bits >> 5) & 1) << (perm[5] as usize);
+    r
+}
+
+#[inline(always)]
+fn permute_bits_k5(pext_bits: usize, perm: &[u8; 10]) -> usize {
+    let mut r = 0usize;
+    r |= (pext_bits & 1) << (perm[0] as usize);
+    r |= ((pext_bits >> 1) & 1) << (perm[1] as usize);
+    r |= ((pext_bits >> 2) & 1) << (perm[2] as usize);
+    r |= ((pext_bits >> 3) & 1) << (perm[3] as usize);
+    r |= ((pext_bits >> 4) & 1) << (perm[4] as usize);
+    r
 }
 
 /// PEXT命令を使用して3進数インデックスを抽出（k=10用）
@@ -169,8 +225,8 @@ pub unsafe fn extract_index_pext_k10(
     let white_pext = _pext_u64(white, mask) as usize;
 
     // PEXTビット順→配列順に並べ替え
-    let black_bits = permute_bits(black_pext, perm, 10);
-    let white_bits = permute_bits(white_pext, perm, 10);
+    let black_bits = permute_bits_k10(black_pext, perm);
+    let white_bits = permute_bits_k10(white_pext, perm);
 
     if swap_colors {
         TERNARY_LUT_K10[white_bits][black_bits] as usize
@@ -197,8 +253,8 @@ pub unsafe fn extract_index_pext_k8(
     let black_pext = _pext_u64(black, mask) as usize;
     let white_pext = _pext_u64(white, mask) as usize;
 
-    let black_bits = permute_bits(black_pext, perm, 8);
-    let white_bits = permute_bits(white_pext, perm, 8);
+    let black_bits = permute_bits_k8(black_pext, perm);
+    let white_bits = permute_bits_k8(white_pext, perm);
 
     if swap_colors {
         TERNARY_LUT_K8[white_bits][black_bits] as usize
@@ -225,8 +281,8 @@ pub unsafe fn extract_index_pext_k7(
     let black_pext = _pext_u64(black, mask) as usize;
     let white_pext = _pext_u64(white, mask) as usize;
 
-    let black_bits = permute_bits(black_pext, perm, 7);
-    let white_bits = permute_bits(white_pext, perm, 7);
+    let black_bits = permute_bits_k7(black_pext, perm);
+    let white_bits = permute_bits_k7(white_pext, perm);
 
     if swap_colors {
         TERNARY_LUT_K7[white_bits][black_bits] as usize
@@ -253,8 +309,8 @@ pub unsafe fn extract_index_pext_k6(
     let black_pext = _pext_u64(black, mask) as usize;
     let white_pext = _pext_u64(white, mask) as usize;
 
-    let black_bits = permute_bits(black_pext, perm, 6);
-    let white_bits = permute_bits(white_pext, perm, 6);
+    let black_bits = permute_bits_k6(black_pext, perm);
+    let white_bits = permute_bits_k6(white_pext, perm);
 
     if swap_colors {
         TERNARY_LUT_K6[white_bits][black_bits] as usize
@@ -281,8 +337,8 @@ pub unsafe fn extract_index_pext_k5(
     let black_pext = _pext_u64(black, mask) as usize;
     let white_pext = _pext_u64(white, mask) as usize;
 
-    let black_bits = permute_bits(black_pext, perm, 5);
-    let white_bits = permute_bits(white_pext, perm, 5);
+    let black_bits = permute_bits_k5(black_pext, perm);
+    let white_bits = permute_bits_k5(white_pext, perm);
 
     if swap_colors {
         TERNARY_LUT_K5[white_bits][black_bits] as usize
@@ -337,7 +393,7 @@ pub unsafe fn extract_all_patterns_pext(
 
     // パターンサイズ: P01-P04=10, P05-P08=8, P09-P10=7, P11-P12=6, P13-P14=5
     for rotation in 0..4 {
-        let swap_colors = rotation % 2 == 1;
+        let swap_colors = rotation & 1 == 1;
         let base_idx = rotation * 14;
 
         // P01-P04 (k=10)

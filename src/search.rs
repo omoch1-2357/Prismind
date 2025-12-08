@@ -614,7 +614,7 @@ fn is_x_square_branchless(pos: u8) -> bool {
 #[inline]
 fn is_edge_branchless(pos: u8) -> bool {
     let row = pos >> 3; // pos / 8
-    let col = pos & 7; // pos % 8
+    let col = pos & 7; // pos & 7
 
     // 角を除外（ビット演算のみ）
     let is_corner = is_corner_branchless(pos);

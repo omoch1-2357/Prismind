@@ -134,7 +134,7 @@ class EvaluationResult:
 
 def pos_to_coords(pos: int) -> Tuple[int, int]:
     """Convert position index to row, column coordinates."""
-    return pos // 8, pos % 8
+    return pos // 8, pos & 7
 
 
 def coords_to_pos(row: int, col: int) -> int:

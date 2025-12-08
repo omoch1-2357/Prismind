@@ -341,7 +341,7 @@ fn rotate_bits_90(bits: u64) -> u64 {
     for bit_pos in 0..64 {
         if (bits & (1u64 << bit_pos)) != 0 {
             let row = bit_pos / 8;
-            let col = bit_pos % 8;
+            let col = bit_pos & 7;
             let new_row = col;
             let new_col = 7 - row;
             let new_pos = new_row * 8 + new_col;
@@ -364,7 +364,7 @@ fn rotate_bits_270(bits: u64) -> u64 {
     for bit_pos in 0..64 {
         if (bits & (1u64 << bit_pos)) != 0 {
             let row = bit_pos / 8;
-            let col = bit_pos % 8;
+            let col = bit_pos & 7;
             let new_row = 7 - col;
             let new_col = row;
             let new_pos = new_row * 8 + new_col;

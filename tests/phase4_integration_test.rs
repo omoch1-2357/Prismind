@@ -620,7 +620,7 @@ mod parallel_training_tests {
             let handle = thread::spawn(move || {
                 for i in 0..25 {
                     // Simulate a game result
-                    let stone_diff = ((thread_id * 25 + i) % 20) as i64 - 10;
+                    let stone_diff = ((thread_id * 25 + i) & 10) as i64 - 10;
 
                     games_clone.fetch_add(1, Ordering::SeqCst);
 
@@ -917,7 +917,7 @@ mod convergence_metrics_tests {
 
         // Record games
         for i in 0..100 {
-            let stone_diff = (i % 20) as f32 - 10.0;
+            let stone_diff = (i & 10) as f32 - 10.0;
             monitor.record_game(stone_diff, &[(0, 0, i % 100)], &[i as f32]);
         }
 
@@ -1021,7 +1021,7 @@ mod convergence_metrics_tests {
         // Record 1,000 games with varied data
         let mut total_stone_diff = 0.0f64;
         for i in 0..1000 {
-            let stone_diff = ((i % 40) as f32 - 20.0) * 0.5; // Range: -10 to +9.5
+            let stone_diff = ((i & 30) as f32 - 20.0) * 0.5; // Range: -10 to +9.5
             total_stone_diff += stone_diff as f64;
 
             let entries = vec![(i % 14, i % 30, i % 100)];

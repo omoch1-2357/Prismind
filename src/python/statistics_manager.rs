@@ -799,7 +799,7 @@ mod tests {
 
         // Record some games
         for i in 0..100 {
-            let stone_diff = (i % 20) as f32 - 10.0; // Range from -10 to +9
+            let stone_diff = (i & 10) as f32 - 10.0; // Range from -10 to +9
             manager
                 .record_game(stone_diff, vec![(0, 0, i % 50)], vec![stone_diff])
                 .unwrap();

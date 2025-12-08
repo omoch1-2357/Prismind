@@ -160,7 +160,7 @@ fn compute_rotated_position(pos: u8, rotation: usize) -> u8 {
         1 => {
             // 90度時計回り
             let row = pos / 8;
-            let col = pos % 8;
+            let col = pos & 7;
             (7 - col) * 8 + row
         }
         2 => {
@@ -170,7 +170,7 @@ fn compute_rotated_position(pos: u8, rotation: usize) -> u8 {
         3 => {
             // 270度時計回り（90度反時計回り）
             let row = pos / 8;
-            let col = pos % 8;
+            let col = pos & 7;
             col * 8 + (7 - row)
         }
         _ => pos,
@@ -428,7 +428,7 @@ fn extract_all_patterns_scalar(
 ) {
     // 各回転について処理（事前計算済み位置を使用）
     for rotation in 0..4 {
-        let swap_colors = rotation % 2 == 1;
+        let swap_colors = rotation & 1 == 1;
         let base_idx = rotation * 14;
 
         for (pattern_idx, pattern) in patterns.iter().enumerate() {

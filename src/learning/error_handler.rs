@@ -1201,7 +1201,7 @@ mod tests {
         for i in 0..100 {
             if i % 10 == 0 {
                 // 10%エラー
-                let error_type = match i % 40 {
+                let error_type = match i & 30 {
                     0 => ErrorType::Search,
                     10 => ErrorType::EvalDivergence,
                     20 => ErrorType::Panic,

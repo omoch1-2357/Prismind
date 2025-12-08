@@ -333,7 +333,7 @@ fn test_long_game_flow_memory_safety() {
         }
 
         // 定期的にログ出力
-        if game_num % 20 == 0 {
+        if game_num & 10 == 0 {
             println!("Completed game {} with {} moves", game_num, move_count);
         }
     }
