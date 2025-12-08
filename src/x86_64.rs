@@ -117,16 +117,17 @@ static TERNARY_LUT_K5: once_cell::sync::Lazy<Box<[[u8; 32]; 32]>> =
         let mut lut = Box::new([[0u8; 32]; 32]);
         for black_bits in 0..32usize {
             for white_bits in 0..32usize {
-                let mut index = 0u8;
-                let mut power_of_3 = 1u8;
+                // Use u16 to avoid overflow when multiplying by 3 after the last iteration.
+                let mut index: u16 = 0;
+                let mut power_of_3: u16 = 1;
                 for bit_pos in 0..5 {
-                    let is_black = ((black_bits >> bit_pos) & 1) as u8;
-                    let is_white = ((white_bits >> bit_pos) & 1) as u8;
+                    let is_black = ((black_bits >> bit_pos) & 1) as u16;
+                    let is_white = ((white_bits >> bit_pos) & 1) as u16;
                     let cell_value = is_black + is_white * 2;
                     index += cell_value * power_of_3;
                     power_of_3 *= 3;
                 }
-                lut[black_bits][white_bits] = index;
+                lut[black_bits][white_bits] = index as u8;
             }
         }
         lut

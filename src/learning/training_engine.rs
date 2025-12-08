@@ -274,7 +274,8 @@ impl Default for TrainingConfig {
     fn default() -> Self {
         Self {
             tt_size_mb: DEFAULT_TT_SIZE_MB,
-            num_threads: default_num_threads(),
+            // Use the deterministic default constant for test stability instead of runtime detection.
+            num_threads: DEFAULT_NUM_THREADS,
             checkpoint_interval: DEFAULT_CHECKPOINT_INTERVAL,
             log_interval: DEFAULT_BATCH_INTERVAL,
             detailed_log_interval: DEFAULT_DETAILED_INTERVAL,
@@ -416,6 +417,10 @@ pub struct TrainingEngine {
     accumulated_wins: (u64, u64, u64),
     /// Total random moves executed by black/white for diagnostics.
     total_random_moves: (u64, u64),
+    /// Total move counts aggregated across all completed games (sum, count).
+    total_move_count: (u64, u64),
+    /// Last detailed stats snapshot used for checkpoint summaries.
+    last_detailed_stats: Option<DetailedStats>,
     /// Next game count threshold for deterministic evaluation sampling.
     next_eval_game: Option<u64>,
 }
@@ -514,6 +519,8 @@ impl TrainingEngine {
             accumulated_stone_diff_stats: (0.0, 0),
             accumulated_wins: (0, 0, 0),
             total_random_moves: (0, 0),
+            total_move_count: (0, 0),
+            last_detailed_stats: None,
             next_eval_game: if eval_interval > 0 && eval_sample > 0 {
                 Some(eval_interval)
             } else {
@@ -628,6 +635,8 @@ impl TrainingEngine {
             accumulated_stone_diff_stats,
             accumulated_wins: meta.accumulated_wins,
             total_random_moves: (0, 0),
+            total_move_count: (0, 0),
+            last_detailed_stats: None,
             next_eval_game: if eval_interval > 0 && eval_sample > 0 {
                 Some(meta.game_count + eval_interval)
             } else {
@@ -1084,7 +1093,7 @@ impl TrainingEngine {
     /// - Req 12.2: Retry checkpoint save once on failure
     fn save_checkpoint(&mut self) -> Result<PathBuf, LearningError> {
         let table = self.eval_table.read().expect("RwLock poisoned");
-        let elapsed = self.total_elapsed_secs() as u64;
+        let elapsed = self.total_elapsed_secs();
         let game_count = self.game_count;
         let checkpoint_mgr = &self.checkpoint_mgr;
         let adam = &self.adam;
@@ -1092,7 +1101,7 @@ impl TrainingEngine {
         // Create full metadata with statistics for resume support
         let meta = CheckpointMeta::with_statistics(
             game_count,
-            elapsed,
+            elapsed as u64,
             adam.timestep(),
             Some(self.target_games.load(Ordering::SeqCst)).filter(|&t| t > 0),
             self.accumulated_wins,
@@ -1123,10 +1132,10 @@ impl TrainingEngine {
 
         drop(table);
 
-        // Log checkpoint summary
-        let batch = BatchStats::from_games(game_count, &[], &[], elapsed as f64);
-        let detailed = DetailedStats::from_metrics(batch, &[], &[], &[], 0, 0);
+        // Log checkpoint summary using the most recent stats snapshot
+        let detailed = self.build_checkpoint_stats(elapsed);
         self.logger.log_checkpoint(game_count, &detailed);
+        self.last_detailed_stats = Some(detailed);
 
         if let Some(ref path) = saved_path {
             self.logger.log_info(&format!(
@@ -1137,6 +1146,95 @@ impl TrainingEngine {
         }
 
         saved_path.ok_or_else(|| save_result.unwrap_err())
+    }
+
+    /// Build a checkpoint summary snapshot using the latest detailed stats when available,
+    /// otherwise fall back to accumulated aggregates.
+    fn build_checkpoint_stats(&self, elapsed_secs: f64) -> DetailedStats {
+        if let Some(ref stats) = self.last_detailed_stats {
+            return stats.clone();
+        }
+
+        let games_completed = self.game_count;
+
+        let avg_stone_diff = if self.accumulated_stone_diff_stats.1 > 0 {
+            (self.accumulated_stone_diff_stats.0 / self.accumulated_stone_diff_stats.1 as f64)
+                as f32
+        } else {
+            0.0
+        };
+
+        let total_games =
+            self.accumulated_wins.0 + self.accumulated_wins.1 + self.accumulated_wins.2;
+        let (black_rate, white_rate, draw_rate) = if total_games > 0 {
+            (
+                self.accumulated_wins.0 as f32 / total_games as f32,
+                self.accumulated_wins.1 as f32 / total_games as f32,
+                self.accumulated_wins.2 as f32 / total_games as f32,
+            )
+        } else {
+            (0.0, 0.0, 0.0)
+        };
+
+        let avg_move_count = if self.total_move_count.1 > 0 {
+            self.total_move_count.0 as f32 / self.total_move_count.1 as f32
+        } else {
+            0.0
+        };
+
+        let games_per_sec = if elapsed_secs > 0.0 {
+            games_completed as f64 / elapsed_secs
+        } else {
+            0.0
+        };
+
+        let games_denom = if self.total_move_count.1 > 0 {
+            self.total_move_count.1 as f32
+        } else {
+            0.0
+        };
+        let avg_random_moves_black = if games_denom > 0.0 {
+            self.total_random_moves.0 as f32 / games_denom
+        } else {
+            0.0
+        };
+        let avg_random_moves_white = if games_denom > 0.0 {
+            self.total_random_moves.1 as f32 / games_denom
+        } else {
+            0.0
+        };
+
+        let total_moves = self.total_move_count.0 as f32;
+        let random_move_rate_black = if total_moves > 0.0 {
+            self.total_random_moves.0 as f32 / total_moves
+        } else {
+            0.0
+        };
+        let random_move_rate_white = if total_moves > 0.0 {
+            self.total_random_moves.1 as f32 / total_moves
+        } else {
+            0.0
+        };
+
+        let batch = BatchStats {
+            games_completed,
+            avg_stone_diff,
+            black_win_rate: black_rate,
+            white_win_rate: white_rate,
+            draw_rate,
+            avg_move_count,
+            elapsed_secs,
+            games_per_sec,
+            avg_random_moves_black,
+            avg_random_moves_white,
+            random_move_rate_black,
+            random_move_rate_white,
+        };
+
+        DetailedStats {
+            batch,
+            ..Default::default()
+        }
     }
 
     /// Handle error threshold exceeded.
@@ -1539,6 +1637,8 @@ impl TrainingEngine {
                                         game_result.random_moves_black as u64;
                                     self.total_random_moves.1 +=
                                         game_result.random_moves_white as u64;
+                                    self.total_move_count.0 += game_result.moves_played as u64;
+                                    self.total_move_count.1 += 1;
 
                                     // Accumulate for progress tracking (using sum and count)
                                     self.accumulated_stone_diff_stats.0 += stone_diff as f64;
@@ -1658,6 +1758,7 @@ impl TrainingEngine {
                     tt_hits_total,
                     tt_probes_total,
                 );
+                self.last_detailed_stats = Some(detailed.clone());
                 self.logger.log_detailed(self.game_count, &detailed);
 
                 if self.convergence.should_report() {
