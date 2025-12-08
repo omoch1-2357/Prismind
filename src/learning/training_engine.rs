@@ -923,11 +923,12 @@ impl TrainingEngine {
             static THREAD_SEARCH: RefCell<Option<Search>> = const { RefCell::new(None) };
         }
 
-        // Create evaluator using Arc shared reference (NO CLONE!)
-        let evaluator = crate::evaluator::Evaluator::from_shared_table(
-            std::sync::Arc::clone(&self.eval_table),
-            &self.patterns,
-        );
+        // Create evaluator with a SNAPSHOT of the evaluation table (clone once per game).
+        // This eliminates per-evaluation RwLock acquisition which was causing ~15% overhead.
+        // The table is ~57MB but cloning once per game is far cheaper than acquiring
+        // a lock for every evaluate() call during alpha-beta search.
+        let table_snapshot = self.eval_table.read().expect("RwLock poisoned").clone();
+        let evaluator = crate::evaluator::Evaluator::from_table(&table_snapshot, &self.patterns);
 
         let patterns = &self.patterns;
         let search_time_ms = self.config.search_time_ms;
