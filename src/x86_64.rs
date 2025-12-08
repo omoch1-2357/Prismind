@@ -12,6 +12,7 @@
 
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
+use std::sync::OnceLock;
 
 // ============================================================================
 // PEXT-based Pattern Extraction (BMI2)
@@ -203,6 +204,95 @@ fn permute_bits_k5(pext_bits: usize, perm: &[u8; 10]) -> usize {
     r
 }
 
+#[derive(Debug)]
+struct PermuteCaches {
+    k10: [[u16; 1024]; 16],
+    k8: [[u16; 256]; 16],
+    k7: [[u16; 128]; 8],
+    k6: [[u16; 64]; 8],
+    k5: [[u16; 32]; 8],
+}
+
+static PERMUTE_CACHES: OnceLock<PermuteCaches> = OnceLock::new();
+
+fn build_permute_caches(patterns: &[crate::pattern::Pattern]) -> PermuteCaches {
+    debug_assert_eq!(patterns.len(), 14);
+
+    let mut caches = PermuteCaches {
+        k10: [[0u16; 1024]; 16],
+        k8: [[0u16; 256]; 16],
+        k7: [[0u16; 128]; 8],
+        k6: [[0u16; 64]; 8],
+        k5: [[0u16; 32]; 8],
+    };
+
+    // k=10 patterns: indices 0-3
+    for (pattern_idx, pattern) in patterns.iter().enumerate().take(4) {
+        for rotation in 0..4 {
+            let perm = &pattern.pext_to_array_map[rotation];
+            let table = &mut caches.k10[rotation * 4 + pattern_idx];
+            for (val, entry) in table.iter_mut().enumerate() {
+                *entry = permute_bits_k10(val, perm) as u16;
+            }
+        }
+    }
+
+    // k=8 patterns: indices 4-7
+    for (pattern_idx, pattern) in patterns.iter().enumerate().skip(4).take(4) {
+        let local_idx = pattern_idx - 4;
+        for rotation in 0..4 {
+            let perm = &pattern.pext_to_array_map[rotation];
+            let table = &mut caches.k8[rotation * 4 + local_idx];
+            for (val, entry) in table.iter_mut().enumerate() {
+                *entry = permute_bits_k8(val, perm) as u16;
+            }
+        }
+    }
+
+    // k=7 patterns: indices 8-9
+    for (pattern_idx, pattern) in patterns.iter().enumerate().skip(8).take(2) {
+        let local_idx = pattern_idx - 8;
+        for rotation in 0..4 {
+            let perm = &pattern.pext_to_array_map[rotation];
+            let table = &mut caches.k7[rotation * 2 + local_idx];
+            for (val, entry) in table.iter_mut().enumerate() {
+                *entry = permute_bits_k7(val, perm) as u16;
+            }
+        }
+    }
+
+    // k=6 patterns: indices 10-11
+    for (pattern_idx, pattern) in patterns.iter().enumerate().skip(10).take(2) {
+        let local_idx = pattern_idx - 10;
+        for rotation in 0..4 {
+            let perm = &pattern.pext_to_array_map[rotation];
+            let table = &mut caches.k6[rotation * 2 + local_idx];
+            for (val, entry) in table.iter_mut().enumerate() {
+                *entry = permute_bits_k6(val, perm) as u16;
+            }
+        }
+    }
+
+    // k=5 patterns: indices 12-13
+    for (pattern_idx, pattern) in patterns.iter().enumerate().skip(12).take(2) {
+        let local_idx = pattern_idx - 12;
+        for rotation in 0..4 {
+            let perm = &pattern.pext_to_array_map[rotation];
+            let table = &mut caches.k5[rotation * 2 + local_idx];
+            for (val, entry) in table.iter_mut().enumerate() {
+                *entry = permute_bits_k5(val, perm) as u16;
+            }
+        }
+    }
+
+    caches
+}
+
+#[inline(always)]
+fn get_permute_caches(patterns: &[crate::pattern::Pattern]) -> &PermuteCaches {
+    PERMUTE_CACHES.get_or_init(|| build_permute_caches(patterns))
+}
+
 /// PEXT命令を使用して3進数インデックスを抽出（k=10用）
 ///
 /// BMI2のPEXT命令でビット抽出を一括処理し、LUTで3進数変換。
@@ -218,15 +308,15 @@ pub unsafe fn extract_index_pext_k10(
     black: u64,
     white: u64,
     mask: u64,
-    perm: &[u8; 10],
     swap_colors: bool,
+    lut: &[u16; 1024],
 ) -> usize {
     let black_pext = _pext_u64(black, mask) as usize;
     let white_pext = _pext_u64(white, mask) as usize;
 
-    // PEXTビット順→配列順に並べ替え
-    let black_bits = permute_bits_k10(black_pext, perm);
-    let white_bits = permute_bits_k10(white_pext, perm);
+    // PEXTビット順→配列順に並べ替え（キャッシュ済みLUT使用）
+    let black_bits = lut[black_pext] as usize;
+    let white_bits = lut[white_pext] as usize;
 
     if swap_colors {
         TERNARY_LUT_K10[white_bits][black_bits] as usize
@@ -247,14 +337,14 @@ pub unsafe fn extract_index_pext_k8(
     black: u64,
     white: u64,
     mask: u64,
-    perm: &[u8; 10],
     swap_colors: bool,
+    lut: &[u16; 256],
 ) -> usize {
     let black_pext = _pext_u64(black, mask) as usize;
     let white_pext = _pext_u64(white, mask) as usize;
 
-    let black_bits = permute_bits_k8(black_pext, perm);
-    let white_bits = permute_bits_k8(white_pext, perm);
+    let black_bits = lut[black_pext] as usize;
+    let white_bits = lut[white_pext] as usize;
 
     if swap_colors {
         TERNARY_LUT_K8[white_bits][black_bits] as usize
@@ -275,14 +365,14 @@ pub unsafe fn extract_index_pext_k7(
     black: u64,
     white: u64,
     mask: u64,
-    perm: &[u8; 10],
     swap_colors: bool,
+    lut: &[u16; 128],
 ) -> usize {
     let black_pext = _pext_u64(black, mask) as usize;
     let white_pext = _pext_u64(white, mask) as usize;
 
-    let black_bits = permute_bits_k7(black_pext, perm);
-    let white_bits = permute_bits_k7(white_pext, perm);
+    let black_bits = lut[black_pext] as usize;
+    let white_bits = lut[white_pext] as usize;
 
     if swap_colors {
         TERNARY_LUT_K7[white_bits][black_bits] as usize
@@ -303,14 +393,14 @@ pub unsafe fn extract_index_pext_k6(
     black: u64,
     white: u64,
     mask: u64,
-    perm: &[u8; 10],
     swap_colors: bool,
+    lut: &[u16; 64],
 ) -> usize {
     let black_pext = _pext_u64(black, mask) as usize;
     let white_pext = _pext_u64(white, mask) as usize;
 
-    let black_bits = permute_bits_k6(black_pext, perm);
-    let white_bits = permute_bits_k6(white_pext, perm);
+    let black_bits = lut[black_pext] as usize;
+    let white_bits = lut[white_pext] as usize;
 
     if swap_colors {
         TERNARY_LUT_K6[white_bits][black_bits] as usize
@@ -331,14 +421,14 @@ pub unsafe fn extract_index_pext_k5(
     black: u64,
     white: u64,
     mask: u64,
-    perm: &[u8; 10],
     swap_colors: bool,
+    lut: &[u16; 32],
 ) -> usize {
     let black_pext = _pext_u64(black, mask) as usize;
     let white_pext = _pext_u64(white, mask) as usize;
 
-    let black_bits = permute_bits_k5(black_pext, perm);
-    let white_bits = permute_bits_k5(white_pext, perm);
+    let black_bits = lut[black_pext] as usize;
+    let white_bits = lut[white_pext] as usize;
 
     if swap_colors {
         TERNARY_LUT_K5[white_bits][black_bits] as usize
@@ -391,6 +481,8 @@ pub unsafe fn extract_all_patterns_pext(
 ) {
     debug_assert_eq!(patterns.len(), 14);
 
+    let caches = get_permute_caches(patterns);
+
     // パターンサイズ: P01-P04=10, P05-P08=8, P09-P10=7, P11-P12=6, P13-P14=5
     for rotation in 0..4 {
         let swap_colors = rotation & 1 == 1;
@@ -400,45 +492,45 @@ pub unsafe fn extract_all_patterns_pext(
         for pattern_idx in 0..4 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let perm = &pattern.pext_to_array_map[rotation];
+            let lut = &caches.k10[rotation * 4 + pattern_idx];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k10(black, white, mask, perm, swap_colors) };
+                unsafe { extract_index_pext_k10(black, white, mask, swap_colors, lut) };
         }
 
         // P05-P08 (k=8)
         for pattern_idx in 4..8 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let perm = &pattern.pext_to_array_map[rotation];
+            let lut = &caches.k8[rotation * 4 + (pattern_idx - 4)];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k8(black, white, mask, perm, swap_colors) };
+                unsafe { extract_index_pext_k8(black, white, mask, swap_colors, lut) };
         }
 
         // P09-P10 (k=7)
         for pattern_idx in 8..10 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let perm = &pattern.pext_to_array_map[rotation];
+            let lut = &caches.k7[rotation * 2 + (pattern_idx - 8)];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k7(black, white, mask, perm, swap_colors) };
+                unsafe { extract_index_pext_k7(black, white, mask, swap_colors, lut) };
         }
 
         // P11-P12 (k=6)
         for pattern_idx in 10..12 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let perm = &pattern.pext_to_array_map[rotation];
+            let lut = &caches.k6[rotation * 2 + (pattern_idx - 10)];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k6(black, white, mask, perm, swap_colors) };
+                unsafe { extract_index_pext_k6(black, white, mask, swap_colors, lut) };
         }
 
         // P13-P14 (k=5)
         for pattern_idx in 12..14 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let perm = &pattern.pext_to_array_map[rotation];
+            let lut = &caches.k5[rotation * 2 + (pattern_idx - 12)];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k5(black, white, mask, perm, swap_colors) };
+                unsafe { extract_index_pext_k5(black, white, mask, swap_colors, lut) };
         }
     }
 }
