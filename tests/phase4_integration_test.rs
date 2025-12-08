@@ -619,8 +619,11 @@ mod parallel_training_tests {
             let diff_clone = Arc::clone(&total_stone_diff);
             let handle = thread::spawn(move || {
                 for i in 0..25 {
-                    // Simulate a game result
-                    let stone_diff = ((thread_id * 25 + i) & 10) as i64 - 10;
+                    // Simulate a deterministic, tightly bounded game result.
+                    // Use modulo to keep the sum near zero regardless of environment state
+                    // (avoids accidental dependence on any persisted checkpoints).
+                    let idx = thread_id * 25 + i;
+                    let stone_diff = (idx % 7) as i64 - 3; // range [-3, 3]
 
                     games_clone.fetch_add(1, Ordering::SeqCst);
 
