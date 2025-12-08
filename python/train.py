@@ -63,6 +63,10 @@ class TrainingManagerProtocol(Protocol):
         """Resume from checkpoint."""
         ...
 
+    def resume_from_checkpoint(self, path: str) -> None:
+        """Resume from a specific checkpoint file."""
+        ...
+
     def game_count(self) -> int:
         """Get current game count."""
         ...
@@ -385,6 +389,14 @@ Examples:
         "--resume", "-r", action="store_true", help="Resume training from latest checkpoint"
     )
 
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Resume training from the specified checkpoint file (overrides --resume)",
+    )
+
     # Directory paths
     parser.add_argument(
         "--checkpoint-dir",
@@ -484,7 +496,16 @@ def main() -> int:
         training_mgr.set_progress_callback(progress_callback)
 
         # Handle resume
-        if args.resume:
+        if args.resume_from:
+            logger.info(f"Attempting to resume from checkpoint file: {args.resume_from}")
+            try:
+                training_mgr.resume_from_checkpoint(args.resume_from)
+                current_games = training_mgr.game_count()
+                logger.info(f"Resumed from checkpoint at {current_games:,} games")
+            except RuntimeError as e:
+                logger.error(f"Failed to resume from specified checkpoint: {e}")
+                return 1
+        elif args.resume:
             logger.info("Attempting to resume from latest checkpoint...")
             try:
                 training_mgr.resume_training()

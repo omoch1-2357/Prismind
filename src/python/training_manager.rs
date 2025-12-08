@@ -461,6 +461,51 @@ impl PyTrainingManager {
         Ok(())
     }
 
+    /// Resume training from a specific checkpoint file.
+    ///
+    /// Loads the provided checkpoint path and prepares the training engine
+    /// to continue. Call start_training() after this to continue training.
+    ///
+    /// # Arguments
+    ///
+    /// * `checkpoint_path` - Path to the checkpoint file to load
+    ///
+    /// # Raises
+    ///
+    /// * `RuntimeError` - If the path is invalid or resume fails
+    #[pyo3(text_signature = "(checkpoint_path)")]
+    pub fn resume_from_checkpoint(
+        &mut self,
+        py: Python<'_>,
+        checkpoint_path: &str,
+    ) -> PyResult<()> {
+        let path = std::path::Path::new(checkpoint_path);
+        if !path.exists() {
+            return Err(PyRuntimeError::new_err(format!(
+                "Checkpoint not found: {}",
+                checkpoint_path
+            )));
+        }
+
+        let config = self
+            .config
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {}", e)))?
+            .clone();
+
+        let engine = py
+            .allow_threads(|| TrainingEngine::resume(path, config))
+            .map_err(|e| PyRuntimeError::new_err(format!("Resume failed: {}", e)))?;
+
+        let mut engine_guard = self
+            .engine
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {}", e)))?;
+        *engine_guard = Some(engine);
+
+        Ok(())
+    }
+
     /// Check if training is currently active.
     ///
     /// # Returns
