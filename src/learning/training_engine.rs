@@ -705,8 +705,8 @@ impl TrainingEngine {
         let mut detailed_eval_values = Vec::new();
         let mut detailed_search_depths = Vec::new();
         let mut detailed_search_times = Vec::new();
-        let tt_hits_total = 0u64;
-        let tt_probes_total = 0u64;
+        let mut tt_hits_total = 0u64;
+        let mut tt_probes_total = 0u64;
 
         // Main training loop
         while self.game_count < target_games {
@@ -761,6 +761,10 @@ impl TrainingEngine {
                                 batch_random_moves_white.push(game_result.random_moves_white);
                                 self.total_random_moves.0 += game_result.random_moves_black as u64;
                                 self.total_random_moves.1 += game_result.random_moves_white as u64;
+
+                                // Accumulate TT statistics from game
+                                tt_hits_total += game_result.tt_hits;
+                                tt_probes_total += game_result.nodes_searched;
 
                                 // Record for convergence monitoring
                                 self.convergence.record_game(
@@ -1556,8 +1560,8 @@ impl TrainingEngine {
         let mut detailed_eval_values = Vec::new();
         let mut detailed_search_depths = Vec::new();
         let mut detailed_search_times = Vec::new();
-        let tt_hits_total = 0u64;
-        let tt_probes_total = 0u64;
+        let mut tt_hits_total = 0u64;
+        let mut tt_probes_total = 0u64;
 
         // Main training loop
         while self.game_count < target_games {
@@ -1640,6 +1644,10 @@ impl TrainingEngine {
                                         game_result.random_moves_white as u64;
                                     self.total_move_count.0 += game_result.moves_played as u64;
                                     self.total_move_count.1 += 1;
+
+                                    // Accumulate TT statistics from game
+                                    tt_hits_total += game_result.tt_hits;
+                                    tt_probes_total += game_result.nodes_searched;
 
                                     // Accumulate for progress tracking (using sum and count)
                                     self.accumulated_stone_diff_stats.0 += stone_diff as f64;

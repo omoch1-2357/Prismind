@@ -154,6 +154,10 @@ pub struct GameResult {
     pub random_moves_black: u32,
     /// 白番のランダム手数
     pub random_moves_white: u32,
+    /// 置換表ヒット数（ゲーム全体）
+    pub tt_hits: u64,
+    /// 探索ノード数（ゲーム全体）
+    pub nodes_searched: u64,
 }
 
 /// ゲーム開始時の手番設定
@@ -232,6 +236,8 @@ pub fn play_game<R: Rng>(
     let mut random_moves = 0;
     let mut random_moves_black = 0u32;
     let mut random_moves_white = 0u32;
+    let mut total_tt_hits = 0u64;
+    let mut total_nodes_searched = 0u64;
 
     loop {
         // ゲーム状態を確認
@@ -246,6 +252,8 @@ pub fn play_game<R: Rng>(
                     random_moves,
                     random_moves_black,
                     random_moves_white,
+                    tt_hits: total_tt_hits,
+                    nodes_searched: total_nodes_searched,
                 });
             }
             GameState::Pass => {
@@ -281,6 +289,9 @@ pub fn play_game<R: Rng>(
             // 最善手探索
             // Req 4.2: 15ms制限でPhase 2 Search APIを使用
             let search_result = search.search(&board, time_limit_ms, None)?;
+            // Collect TT statistics
+            total_tt_hits += search_result.tt_hits;
+            total_nodes_searched += search_result.nodes_searched;
             let best_move = search_result.best_move.ok_or_else(|| {
                 LearningError::Search(crate::search::SearchError::InvalidBoardState(
                     "No legal moves found".to_string(),
@@ -524,6 +535,8 @@ mod tests {
             random_moves: 5,
             random_moves_black: 3,
             random_moves_white: 2,
+            tt_hits: 1000,
+            nodes_searched: 5000,
         };
 
         assert_eq!(result.final_score, 10.0);
