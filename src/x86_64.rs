@@ -26,7 +26,11 @@ use std::sync::OnceLock;
 #[cfg(target_arch = "x86_64")]
 static TERNARY_LUT_K10: once_cell::sync::Lazy<Box<[[u32; 1024]; 1024]>> =
     once_cell::sync::Lazy::new(|| {
-        let mut lut = Box::new([[0u32; 1024]; 1024]);
+        // Heap-allocate via Vec to avoid large stack frames during initialization
+        let mut lut: Box<[[u32; 1024]; 1024]> = vec![[0u32; 1024]; 1024]
+            .into_boxed_slice()
+            .try_into()
+            .expect("length must match");
         for black_bits in 0..1024usize {
             for white_bits in 0..1024usize {
                 let mut index = 0u32;
@@ -49,7 +53,10 @@ static TERNARY_LUT_K10: once_cell::sync::Lazy<Box<[[u32; 1024]; 1024]>> =
 #[cfg(target_arch = "x86_64")]
 static TERNARY_LUT_K8: once_cell::sync::Lazy<Box<[[u16; 256]; 256]>> =
     once_cell::sync::Lazy::new(|| {
-        let mut lut = Box::new([[0u16; 256]; 256]);
+        let mut lut: Box<[[u16; 256]; 256]> = vec![[0u16; 256]; 256]
+            .into_boxed_slice()
+            .try_into()
+            .expect("length must match");
         for black_bits in 0..256usize {
             for white_bits in 0..256usize {
                 let mut index = 0u16;
@@ -71,7 +78,10 @@ static TERNARY_LUT_K8: once_cell::sync::Lazy<Box<[[u16; 256]; 256]>> =
 #[cfg(target_arch = "x86_64")]
 static TERNARY_LUT_K7: once_cell::sync::Lazy<Box<[[u16; 128]; 128]>> =
     once_cell::sync::Lazy::new(|| {
-        let mut lut = Box::new([[0u16; 128]; 128]);
+        let mut lut: Box<[[u16; 128]; 128]> = vec![[0u16; 128]; 128]
+            .into_boxed_slice()
+            .try_into()
+            .expect("length must match");
         for black_bits in 0..128usize {
             for white_bits in 0..128usize {
                 let mut index = 0u16;
@@ -93,7 +103,10 @@ static TERNARY_LUT_K7: once_cell::sync::Lazy<Box<[[u16; 128]; 128]>> =
 #[cfg(target_arch = "x86_64")]
 static TERNARY_LUT_K6: once_cell::sync::Lazy<Box<[[u16; 64]; 64]>> =
     once_cell::sync::Lazy::new(|| {
-        let mut lut = Box::new([[0u16; 64]; 64]);
+        let mut lut: Box<[[u16; 64]; 64]> = vec![[0u16; 64]; 64]
+            .into_boxed_slice()
+            .try_into()
+            .expect("length must match");
         for black_bits in 0..64usize {
             for white_bits in 0..64usize {
                 let mut index = 0u16;
@@ -115,7 +128,10 @@ static TERNARY_LUT_K6: once_cell::sync::Lazy<Box<[[u16; 64]; 64]>> =
 #[cfg(target_arch = "x86_64")]
 static TERNARY_LUT_K5: once_cell::sync::Lazy<Box<[[u8; 32]; 32]>> =
     once_cell::sync::Lazy::new(|| {
-        let mut lut = Box::new([[0u8; 32]; 32]);
+        let mut lut: Box<[[u8; 32]; 32]> = vec![[0u8; 32]; 32]
+            .into_boxed_slice()
+            .try_into()
+            .expect("length must match");
         for black_bits in 0..32usize {
             for white_bits in 0..32usize {
                 // Use u16 to avoid overflow when multiplying by 3 after the last iteration.
@@ -215,6 +231,18 @@ struct PermuteCaches {
 
 static PERMUTE_CACHES: OnceLock<PermuteCaches> = OnceLock::new();
 
+#[derive(Debug)]
+struct FusedCaches {
+    // rotation(0-3) x pattern local index
+    k10: [Box<[u16]>; 16],
+    k8: [Box<[u16]>; 16],
+    k7: [Box<[u16]>; 8],
+    k6: [Box<[u16]>; 8],
+    k5: [Box<[u16]>; 8],
+}
+
+static FUSED_CACHES: OnceLock<FusedCaches> = OnceLock::new();
+
 fn build_permute_caches(patterns: &[crate::pattern::Pattern]) -> PermuteCaches {
     debug_assert_eq!(patterns.len(), 14);
 
@@ -293,6 +321,185 @@ fn get_permute_caches(patterns: &[crate::pattern::Pattern]) -> &PermuteCaches {
     PERMUTE_CACHES.get_or_init(|| build_permute_caches(patterns))
 }
 
+#[inline]
+fn build_fused_table_k10(perm: &[u16; 1024], swap_colors: bool) -> Box<[u16]> {
+    const SIZE: usize = 1024;
+    let mut lut = vec![0u16; SIZE * SIZE].into_boxed_slice();
+
+    for (black_raw, &black_perm) in perm.iter().enumerate() {
+        let black_bits = black_perm as usize;
+        let row_base = black_raw * SIZE;
+        for (white_raw, &white_perm) in perm.iter().enumerate() {
+            let white_bits = white_perm as usize;
+            let val = if swap_colors {
+                TERNARY_LUT_K10[white_bits][black_bits]
+            } else {
+                TERNARY_LUT_K10[black_bits][white_bits]
+            } as u16;
+            // SAFETY: bounds checked by construction
+            unsafe {
+                *lut.get_unchecked_mut(row_base + white_raw) = val;
+            }
+        }
+    }
+
+    lut
+}
+
+#[inline]
+fn build_fused_table_k8(perm: &[u16; 256], swap_colors: bool) -> Box<[u16]> {
+    const SIZE: usize = 256;
+    let mut lut = vec![0u16; SIZE * SIZE].into_boxed_slice();
+
+    for (black_raw, &black_perm) in perm.iter().enumerate() {
+        let black_bits = black_perm as usize;
+        let row_base = black_raw * SIZE;
+        for (white_raw, &white_perm) in perm.iter().enumerate() {
+            let white_bits = white_perm as usize;
+            let val = if swap_colors {
+                TERNARY_LUT_K8[white_bits][black_bits]
+            } else {
+                TERNARY_LUT_K8[black_bits][white_bits]
+            };
+            unsafe {
+                *lut.get_unchecked_mut(row_base + white_raw) = val;
+            }
+        }
+    }
+
+    lut
+}
+
+#[inline]
+fn build_fused_table_k7(perm: &[u16; 128], swap_colors: bool) -> Box<[u16]> {
+    const SIZE: usize = 128;
+    let mut lut = vec![0u16; SIZE * SIZE].into_boxed_slice();
+
+    for (black_raw, &black_perm) in perm.iter().enumerate() {
+        let black_bits = black_perm as usize;
+        let row_base = black_raw * SIZE;
+        for (white_raw, &white_perm) in perm.iter().enumerate() {
+            let white_bits = white_perm as usize;
+            let val = if swap_colors {
+                TERNARY_LUT_K7[white_bits][black_bits]
+            } else {
+                TERNARY_LUT_K7[black_bits][white_bits]
+            };
+            unsafe {
+                *lut.get_unchecked_mut(row_base + white_raw) = val;
+            }
+        }
+    }
+
+    lut
+}
+
+#[inline]
+fn build_fused_table_k6(perm: &[u16; 64], swap_colors: bool) -> Box<[u16]> {
+    const SIZE: usize = 64;
+    let mut lut = vec![0u16; SIZE * SIZE].into_boxed_slice();
+
+    for (black_raw, &black_perm) in perm.iter().enumerate() {
+        let black_bits = black_perm as usize;
+        let row_base = black_raw * SIZE;
+        for (white_raw, &white_perm) in perm.iter().enumerate() {
+            let white_bits = white_perm as usize;
+            let val = if swap_colors {
+                TERNARY_LUT_K6[white_bits][black_bits]
+            } else {
+                TERNARY_LUT_K6[black_bits][white_bits]
+            };
+            unsafe {
+                *lut.get_unchecked_mut(row_base + white_raw) = val;
+            }
+        }
+    }
+
+    lut
+}
+
+#[inline]
+fn build_fused_table_k5(perm: &[u16; 32], swap_colors: bool) -> Box<[u16]> {
+    const SIZE: usize = 32;
+    let mut lut = vec![0u16; SIZE * SIZE].into_boxed_slice();
+
+    for (black_raw, &black_perm) in perm.iter().enumerate() {
+        let black_bits = black_perm as usize;
+        let row_base = black_raw * SIZE;
+        for (white_raw, &white_perm) in perm.iter().enumerate() {
+            let white_bits = white_perm as usize;
+            let val = if swap_colors {
+                TERNARY_LUT_K5[white_bits][black_bits]
+            } else {
+                TERNARY_LUT_K5[black_bits][white_bits]
+            } as u16;
+            unsafe {
+                *lut.get_unchecked_mut(row_base + white_raw) = val;
+            }
+        }
+    }
+
+    lut
+}
+
+fn build_fused_caches(patterns: &[crate::pattern::Pattern]) -> FusedCaches {
+    debug_assert_eq!(patterns.len(), 14);
+    let perm = get_permute_caches(patterns);
+
+    let mut k10: [Box<[u16]>; 16] = std::array::from_fn(|_| Vec::new().into_boxed_slice());
+    let mut k8: [Box<[u16]>; 16] = std::array::from_fn(|_| Vec::new().into_boxed_slice());
+    let mut k7: [Box<[u16]>; 8] = std::array::from_fn(|_| Vec::new().into_boxed_slice());
+    let mut k6: [Box<[u16]>; 8] = std::array::from_fn(|_| Vec::new().into_boxed_slice());
+    let mut k5: [Box<[u16]>; 8] = std::array::from_fn(|_| Vec::new().into_boxed_slice());
+
+    for rotation in 0..4 {
+        let swap_colors = rotation & 1 == 1;
+
+        // k10 patterns indices 0..4
+        for pattern_idx in 0..4 {
+            let lut_idx = rotation * 4 + pattern_idx;
+            k10[lut_idx] = build_fused_table_k10(&perm.k10[lut_idx], swap_colors);
+        }
+
+        // k8 patterns indices 4..8 (local 0..4)
+        for pattern_idx in 0..4 {
+            let lut_idx = rotation * 4 + pattern_idx;
+            k8[lut_idx] = build_fused_table_k8(&perm.k8[lut_idx], swap_colors);
+        }
+
+        // k7 patterns indices 8..10 (local 0..2)
+        for pattern_idx in 0..2 {
+            let lut_idx = rotation * 2 + pattern_idx;
+            k7[lut_idx] = build_fused_table_k7(&perm.k7[lut_idx], swap_colors);
+        }
+
+        // k6 patterns indices 10..12 (local 0..2)
+        for pattern_idx in 0..2 {
+            let lut_idx = rotation * 2 + pattern_idx;
+            k6[lut_idx] = build_fused_table_k6(&perm.k6[lut_idx], swap_colors);
+        }
+
+        // k5 patterns indices 12..14 (local 0..2)
+        for pattern_idx in 0..2 {
+            let lut_idx = rotation * 2 + pattern_idx;
+            k5[lut_idx] = build_fused_table_k5(&perm.k5[lut_idx], swap_colors);
+        }
+    }
+
+    FusedCaches {
+        k10,
+        k8,
+        k7,
+        k6,
+        k5,
+    }
+}
+
+#[inline(always)]
+fn get_fused_caches(patterns: &[crate::pattern::Pattern]) -> &FusedCaches {
+    FUSED_CACHES.get_or_init(|| build_fused_caches(patterns))
+}
+
 /// PEXT命令を使用して3進数インデックスを抽出（k=10用）
 ///
 /// BMI2のPEXT命令でビット抽出を一括処理し、LUTで3進数変換。
@@ -325,6 +532,15 @@ pub unsafe fn extract_index_pext_k10(
     }
 }
 
+#[inline(always)]
+unsafe fn extract_index_pext_k10_fused(black: u64, white: u64, mask: u64, fused: &[u16]) -> usize {
+    const SIZE: usize = 1024;
+    let black_pext = unsafe { _pext_u64(black, mask) as usize };
+    let white_pext = unsafe { _pext_u64(white, mask) as usize };
+    // SAFETY: fused table is pre-sized to SIZE * SIZE
+    unsafe { *fused.get_unchecked(black_pext * SIZE + white_pext) as usize }
+}
+
 /// PEXT命令を使用して3進数インデックスを抽出（k=8用）
 ///
 /// # Safety
@@ -351,6 +567,14 @@ pub unsafe fn extract_index_pext_k8(
     } else {
         TERNARY_LUT_K8[black_bits][white_bits] as usize
     }
+}
+
+#[inline(always)]
+unsafe fn extract_index_pext_k8_fused(black: u64, white: u64, mask: u64, fused: &[u16]) -> usize {
+    const SIZE: usize = 256;
+    let black_pext = unsafe { _pext_u64(black, mask) as usize };
+    let white_pext = unsafe { _pext_u64(white, mask) as usize };
+    unsafe { *fused.get_unchecked(black_pext * SIZE + white_pext) as usize }
 }
 
 /// PEXT命令を使用して3進数インデックスを抽出（k=7用）
@@ -381,6 +605,14 @@ pub unsafe fn extract_index_pext_k7(
     }
 }
 
+#[inline(always)]
+unsafe fn extract_index_pext_k7_fused(black: u64, white: u64, mask: u64, fused: &[u16]) -> usize {
+    const SIZE: usize = 128;
+    let black_pext = unsafe { _pext_u64(black, mask) as usize };
+    let white_pext = unsafe { _pext_u64(white, mask) as usize };
+    unsafe { *fused.get_unchecked(black_pext * SIZE + white_pext) as usize }
+}
+
 /// PEXT命令を使用して3進数インデックスを抽出（k=6用）
 ///
 /// # Safety
@@ -409,6 +641,14 @@ pub unsafe fn extract_index_pext_k6(
     }
 }
 
+#[inline(always)]
+unsafe fn extract_index_pext_k6_fused(black: u64, white: u64, mask: u64, fused: &[u16]) -> usize {
+    const SIZE: usize = 64;
+    let black_pext = unsafe { _pext_u64(black, mask) as usize };
+    let white_pext = unsafe { _pext_u64(white, mask) as usize };
+    unsafe { *fused.get_unchecked(black_pext * SIZE + white_pext) as usize }
+}
+
 /// PEXT命令を使用して3進数インデックスを抽出（k=5用）
 ///
 /// # Safety
@@ -435,6 +675,14 @@ pub unsafe fn extract_index_pext_k5(
     } else {
         TERNARY_LUT_K5[black_bits][white_bits] as usize
     }
+}
+
+#[inline(always)]
+unsafe fn extract_index_pext_k5_fused(black: u64, white: u64, mask: u64, fused: &[u16]) -> usize {
+    const SIZE: usize = 32;
+    let black_pext = unsafe { _pext_u64(black, mask) as usize };
+    let white_pext = unsafe { _pext_u64(white, mask) as usize };
+    unsafe { *fused.get_unchecked(black_pext * SIZE + white_pext) as usize }
 }
 
 /// BMI2が利用可能かどうかをランタイムで判定
@@ -481,56 +729,55 @@ pub unsafe fn extract_all_patterns_pext(
 ) {
     debug_assert_eq!(patterns.len(), 14);
 
-    let caches = get_permute_caches(patterns);
+    let fused = get_fused_caches(patterns);
 
     // パターンサイズ: P01-P04=10, P05-P08=8, P09-P10=7, P11-P12=6, P13-P14=5
     for rotation in 0..4 {
-        let swap_colors = rotation & 1 == 1;
         let base_idx = rotation * 14;
 
         // P01-P04 (k=10)
         for pattern_idx in 0..4 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let lut = &caches.k10[rotation * 4 + pattern_idx];
+            let lut = &fused.k10[rotation * 4 + pattern_idx];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k10(black, white, mask, swap_colors, lut) };
+                unsafe { extract_index_pext_k10_fused(black, white, mask, lut) };
         }
 
         // P05-P08 (k=8)
         for pattern_idx in 4..8 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let lut = &caches.k8[rotation * 4 + (pattern_idx - 4)];
+            let lut = &fused.k8[rotation * 4 + (pattern_idx - 4)];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k8(black, white, mask, swap_colors, lut) };
+                unsafe { extract_index_pext_k8_fused(black, white, mask, lut) };
         }
 
         // P09-P10 (k=7)
         for pattern_idx in 8..10 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let lut = &caches.k7[rotation * 2 + (pattern_idx - 8)];
+            let lut = &fused.k7[rotation * 2 + (pattern_idx - 8)];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k7(black, white, mask, swap_colors, lut) };
+                unsafe { extract_index_pext_k7_fused(black, white, mask, lut) };
         }
 
         // P11-P12 (k=6)
         for pattern_idx in 10..12 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let lut = &caches.k6[rotation * 2 + (pattern_idx - 10)];
+            let lut = &fused.k6[rotation * 2 + (pattern_idx - 10)];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k6(black, white, mask, swap_colors, lut) };
+                unsafe { extract_index_pext_k6_fused(black, white, mask, lut) };
         }
 
         // P13-P14 (k=5)
         for pattern_idx in 12..14 {
             let pattern = &patterns[pattern_idx];
             let mask = pattern.rotated_masks[rotation];
-            let lut = &caches.k5[rotation * 2 + (pattern_idx - 12)];
+            let lut = &fused.k5[rotation * 2 + (pattern_idx - 12)];
             out[base_idx + pattern_idx] =
-                unsafe { extract_index_pext_k5(black, white, mask, swap_colors, lut) };
+                unsafe { extract_index_pext_k5_fused(black, white, mask, lut) };
         }
     }
 }

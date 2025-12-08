@@ -1476,10 +1476,22 @@ impl EnhancedCheckpointManager {
     }
 
     /// Parse game count from checkpoint filename.
+    ///
+    /// Handles both formats:
+    /// - New format: checkpoint_YYYYMMDD_HHMMSS_NNNNNN.bin
+    /// - Legacy format: checkpoint_NNNNNN.bin
     fn parse_checkpoint_filename(filename: &str) -> Option<u64> {
         if filename.starts_with("checkpoint_") && filename.ends_with(".bin") {
-            let num_str = &filename[11..filename.len() - 4];
-            num_str.parse().ok()
+            // Extract the part between "checkpoint_" and ".bin"
+            let inner = &filename[11..filename.len() - 4];
+            // New format has underscores: YYYYMMDD_HHMMSS_NNNNNN
+            if let Some(last_underscore) = inner.rfind('_') {
+                // Try parsing the part after the last underscore as game count
+                inner[last_underscore + 1..].parse().ok()
+            } else {
+                // Legacy format: just NNNNNN
+                inner.parse().ok()
+            }
         } else {
             None
         }
