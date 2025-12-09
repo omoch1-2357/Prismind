@@ -90,6 +90,9 @@
 //! - 評価テーブル: 約70-80MB (30ステージ × 14パターン)
 //! - BitBoard: 24バイト (石配置16バイト + メタデータ)
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 // 公開モジュール
 pub mod board;
 pub mod evaluator;

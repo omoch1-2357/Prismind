@@ -30,6 +30,7 @@ use crate::learning::LearningError;
 use crate::learning::adam::AdamOptimizer;
 use crate::learning::eligibility_trace::EligibilityTrace;
 use crate::learning::game_history::GameHistory;
+use rustc_hash::FxHashMap;
 
 /// Total memory budget in bytes (600 MB).
 ///
@@ -854,13 +855,13 @@ impl MemoryReport {
         )
     }
 
-    /// Convert to HashMap for Python dictionary.
+    /// Convert to HashMap for Python dictionary (internally uses FxHashMap).
     ///
     /// # Requirement Coverage
     ///
     /// - Req 7.8: Expose memory metrics via Python API
     pub fn to_dict(&self) -> std::collections::HashMap<String, f64> {
-        let mut map = std::collections::HashMap::new();
+        let mut map: FxHashMap<String, f64> = FxHashMap::default();
         map.insert("budget_mb".to_string(), self.budget_mb);
         map.insert("total_allocated_mb".to_string(), self.total_allocated_mb);
         map.insert("eval_table_mb".to_string(), self.eval_table_mb);
@@ -876,7 +877,8 @@ impl MemoryReport {
             "fragmentation_percent".to_string(),
             self.fragmentation.fragmentation_percent,
         );
-        map
+        // Convert FxHashMap back to std::collections::HashMap for API compatibility
+        map.into_iter().collect()
     }
 }
 

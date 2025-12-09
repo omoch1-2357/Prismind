@@ -22,6 +22,7 @@ use std::sync::RwLock;
 
 use crate::board::{BitBoard, Color};
 use crate::evaluator::{EvaluationTable, Evaluator};
+use rustc_hash::FxHashMap;
 
 /// Python wrapper for the Othello board evaluator.
 ///
@@ -297,7 +298,7 @@ impl PyEvaluator {
             .read()
             .map_err(|e| PyValueError::new_err(format!("Failed to acquire read lock: {}", e)))?;
 
-        let mut weights = std::collections::HashMap::new();
+        let mut weights: FxHashMap<(usize, usize, usize), f64> = FxHashMap::default();
 
         // Export all weights (this is expensive - ~14 patterns * 30 stages * varying indices)
         for pattern_id in 0..14 {
@@ -310,7 +311,8 @@ impl PyEvaluator {
             }
         }
 
-        Ok(weights)
+        // Convert FxHashMap to std::collections::HashMap for Python API compatibility
+        Ok(weights.into_iter().collect())
     }
 }
 

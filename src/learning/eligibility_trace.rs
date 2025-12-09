@@ -11,7 +11,7 @@
 //!
 //! # Memory Efficiency
 //!
-//! Uses HashMap for sparse storage to minimize memory usage. Only visited
+//! Uses FxHashMap for sparse storage to minimize memory usage. Only visited
 //! pattern entries have non-zero traces stored.
 //!
 //! # Requirements Coverage
@@ -23,7 +23,7 @@
 //! - Req 2.5: Reset all traces to zero for new game
 //! - Req 2.6: Use sparse HashMap storage to minimize memory
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Key type for eligibility trace entries.
 ///
@@ -32,7 +32,7 @@ pub type TraceKey = (usize, usize, usize);
 
 /// Sparse eligibility trace storage.
 ///
-/// Maintains eligibility traces for visited pattern entries using a HashMap.
+/// Maintains eligibility traces for visited pattern entries using a FxHashMap.
 /// This sparse representation minimizes memory usage by only storing non-zero traces.
 ///
 /// # Lifecycle
@@ -65,7 +65,7 @@ pub type TraceKey = (usize, usize, usize);
 #[derive(Debug, Clone)]
 pub struct EligibilityTrace {
     /// (pattern_id, stage, index) -> trace value
-    traces: HashMap<TraceKey, f32>,
+    traces: FxHashMap<TraceKey, f32>,
 }
 
 impl Default for EligibilityTrace {
@@ -86,7 +86,7 @@ impl EligibilityTrace {
     /// - Req 2.5: Start with all traces at zero
     pub fn new() -> Self {
         Self {
-            traces: HashMap::new(),
+            traces: FxHashMap::default(),
         }
     }
 
@@ -97,10 +97,14 @@ impl EligibilityTrace {
     ///
     /// # Arguments
     ///
-    /// * `capacity` - Initial capacity for the HashMap
+    /// * `capacity` - Initial capacity for the FxHashMap
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            traces: HashMap::with_capacity(capacity),
+            traces: {
+                let mut map = FxHashMap::default();
+                map.reserve(capacity);
+                map
+            },
         }
     }
 
@@ -207,9 +211,9 @@ impl EligibilityTrace {
     ///
     /// # Returns
     ///
-    /// Approximate memory usage including HashMap overhead.
+    /// Approximate memory usage including FxHashMap overhead.
     pub fn memory_usage(&self) -> usize {
-        // HashMap overhead: approximately 48 bytes per entry (key + value + bucket overhead)
+        // FxHashMap overhead: approximately 48 bytes per entry (key + value + bucket overhead)
         // Key: 3 * size_of::<usize>() = 24 bytes
         // Value: size_of::<f32>() = 4 bytes
         // Bucket overhead: ~20 bytes
@@ -441,7 +445,7 @@ mod tests {
         assert_eq!(trace.get(1, 1, 1), 1.0);
     }
 
-    // ========== Requirement 2.6: Sparse storage (HashMap) ==========
+    // ========== Requirement 2.6: Sparse storage (FxHashMap) ==========
 
     #[test]
     fn test_sparse_storage_only_stores_visited() {
@@ -570,7 +574,7 @@ mod tests {
         // Req 2.6: Sparse HashMap storage
         trace.increment(0, 0, 0);
         assert!(trace.memory_usage() < 1000);
-        println!("  2.6: Sparse HashMap storage minimizes memory");
+        println!("  2.6: Sparse FxHashMap storage minimizes memory");
 
         println!("=== All eligibility trace requirements verified ===");
     }

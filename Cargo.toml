@@ -16,6 +16,8 @@ log = "0.4"               # Training statistics logging (Req 7.6)
 env_logger = "0.11"       # Logger implementation (Req 7.6)
 ctrlc = "3.4"             # Graceful shutdown signal handling (Req 12.7)
 rand = "0.9.2"            # Epsilon-greedy exploration (promoted from dev-dependency)
+mimalloc = { version = "0.1.48", default-features = false }
+rustc-hash = "2.1.1"
 
 # Phase 4: Python bindings and integration dependencies
 pyo3 = { version = "0.24", features = ["extension-module", "abi3-py38"], optional = true }
