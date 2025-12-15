@@ -147,7 +147,7 @@ jobs:
           fi
 
       - name: Upload x86_64 perf results
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: perf-results-x86-64
@@ -274,7 +274,7 @@ jobs:
           fi
 
       - name: Upload ARM64 perf results
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: perf-results-arm64
@@ -390,7 +390,7 @@ jobs:
           cat performance_comparison.md
 
       - name: Upload comparison report
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: performance-comparison-report
           path: performance_comparison.md
