@@ -9,7 +9,7 @@ serde = { version = "1.0", features = ["derive"] }
 thiserror = "2"
 once_cell = "1.20"            # Lazy static initialization for PEXT lookup tables
 # Phase 3: Learning module dependencies
-bincode = "2.0"           # Checkpoint serialization (Req 6.1)
+bincode = "3.0"           # Checkpoint serialization (Req 6.1)
 rayon = "1.10"            # Parallel game execution (Req 13.8)
 chrono = "0.4"            # Timestamp handling (Req 7.6)
 log = "0.4"               # Training statistics logging (Req 7.6)
