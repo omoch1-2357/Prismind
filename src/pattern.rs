@@ -69,11 +69,18 @@ pub struct Pattern {
 }
 
 /// CSV読み込み用の中間構造体
+///
+/// CSVフォーマット: pattern_id,k,entries_per_stage,coords
 #[derive(Debug, Deserialize)]
 struct PatternCsv {
-    id: String,
+    /// パターンID (P01, P02, ..., P14)
+    pattern_id: String,
+    /// パターンのセル数
     k: u8,
-    positions: String,
+    /// ステージあたりのエントリ数 (3^k) - パース時は検証用
+    entries_per_stage: u32,
+    /// 座標リスト (スペース区切り)
+    coords: String,
 }
 
 impl Pattern {
@@ -489,9 +496,9 @@ fn extract_index_with_positions_ref(
 /// # CSV形式
 ///
 /// ```csv
-/// id,k,positions
-/// P01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
-/// P02,10,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
+/// pattern_id,k,entries_per_stage,coords
+/// P01,10,59049,A1 B1 A2 B2 C2 B3 C3 D3 C4 D4
+/// P02,10,59049,A1 B1 A2 B2 C3 D4 E5 F6 G7 H8
 /// ...
 /// ```
 ///
@@ -540,34 +547,40 @@ pub fn load_patterns<P: AsRef<Path>>(path: P) -> Result<Vec<Pattern>, PatternErr
         })?;
 
         // IDをu8に変換（P01 -> 0, P02 -> 1, ..., P14 -> 13）
-        let id = if record.id.starts_with('P') || record.id.starts_with('p') {
-            let num_str = &record.id[1..];
+        let id = if record.pattern_id.starts_with('P') || record.pattern_id.starts_with('p') {
+            let num_str = &record.pattern_id[1..];
             num_str.parse::<u8>().map_err(|_| {
-                PatternError::LoadError(format!("Invalid pattern ID: {}", record.id))
+                PatternError::LoadError(format!("Invalid pattern ID: {}", record.pattern_id))
             })? - 1
         } else {
             return Err(PatternError::LoadError(format!(
                 "Invalid pattern ID format: {}",
-                record.id
+                record.pattern_id
             )));
         };
 
         // 座標文字列を分割してビット位置に変換
-        let positions: Result<Vec<u8>, PatternError> = record
-            .positions
-            .split_whitespace()
-            .map(coord_to_bit)
-            .collect();
+        let positions: Result<Vec<u8>, PatternError> =
+            record.coords.split_whitespace().map(coord_to_bit).collect();
 
         let positions = positions?;
 
         // セル数の検証
         if positions.len() != record.k as usize {
             return Err(PatternError::LoadError(format!(
-                "Pattern {}: k={} but {} positions provided",
-                record.id,
+                "Pattern {}: k={} but {} coords provided",
+                record.pattern_id,
                 record.k,
                 positions.len()
+            )));
+        }
+
+        // entries_per_stage の検証（3^k と一致することを確認）
+        let expected_entries = 3u32.pow(record.k as u32);
+        if record.entries_per_stage != expected_entries {
+            return Err(PatternError::LoadError(format!(
+                "Pattern {}: entries_per_stage={} but expected {} (3^{})",
+                record.pattern_id, record.entries_per_stage, expected_entries, record.k
             )));
         }
 
@@ -743,21 +756,21 @@ mod tests {
     fn test_load_patterns_valid_csv() {
         // 有効なCSVファイルを読み込む
         let csv_content = "\
-id,k,positions
-P01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
-P02,10,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
-P03,10,A1 B1 A2 B2 C1 D1 C2 D2 E1 F1
-P04,10,A1 B2 C3 D4 E5 F6 G7 H8 A2 B3
-P05,8,A1 B1 C1 D1 E1 F1 G1 H1
-P06,8,A1 A2 A3 A4 A5 A6 A7 A8
-P07,8,A1 B2 C3 D4 E5 F6 G7 H8
-P08,8,H1 G2 F3 E4 D5 C6 B7 A8
-P09,6,A1 B1 C1 D1 E1 F1
-P10,6,A1 A2 A3 A4 A5 A6
-P11,5,A1 B1 C1 D1 E1
-P12,5,A1 A2 A3 A4 A5
-P13,4,A1 B1 C1 D1
-P14,4,A1 A2 A3 A4
+pattern_id,k,entries_per_stage,coords
+P01,10,59049,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
+P02,10,59049,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
+P03,10,59049,A1 B1 A2 B2 C1 D1 C2 D2 E1 F1
+P04,10,59049,A1 B2 C3 D4 E5 F6 G7 H8 A2 B3
+P05,8,6561,A1 B1 C1 D1 E1 F1 G1 H1
+P06,8,6561,A1 A2 A3 A4 A5 A6 A7 A8
+P07,8,6561,A1 B2 C3 D4 E5 F6 G7 H8
+P08,8,6561,H1 G2 F3 E4 D5 C6 B7 A8
+P09,6,729,A1 B1 C1 D1 E1 F1
+P10,6,729,A1 A2 A3 A4 A5 A6
+P11,5,243,A1 B1 C1 D1 E1
+P12,5,243,A1 A2 A3 A4 A5
+P13,4,81,A1 B1 C1 D1
+P14,4,81,A1 A2 A3 A4
 ";
 
         // 一時ファイルを作成
@@ -790,9 +803,9 @@ P14,4,A1 A2 A3 A4
     fn test_load_patterns_wrong_count() {
         // パターン数が14でない場合にエラーを返す
         let csv_content = "\
-id,k,positions
-P01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
-P02,10,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
+pattern_id,k,entries_per_stage,coords
+P01,10,59049,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
+P02,10,59049,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
 ";
 
         let temp_dir = std::env::temp_dir();
@@ -818,8 +831,8 @@ P02,10,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
     fn test_load_patterns_invalid_position() {
         // 座標が範囲外の場合にエラーを返す
         let csv_content = "\
-id,k,positions
-P01,3,A1 B1 I9
+pattern_id,k,entries_per_stage,coords
+P01,3,27,A1 B1 I9
 ";
 
         let temp_dir = std::env::temp_dir();
@@ -844,21 +857,21 @@ P01,3,A1 B1 I9
     fn test_load_patterns_sorted_by_id() {
         // パターンがIDでソートされていることを確認
         let csv_content = "\
-id,k,positions
-P14,4,A1 A2 A3 A4
-P01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
-P02,10,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
-P03,10,A1 B1 A2 B2 C1 D1 C2 D2 E1 F1
-P04,10,A1 B2 C3 D4 E5 F6 G7 H8 A2 B3
-P05,8,A1 B1 C1 D1 E1 F1 G1 H1
-P06,8,A1 A2 A3 A4 A5 A6 A7 A8
-P07,8,A1 B2 C3 D4 E5 F6 G7 H8
-P08,8,H1 G2 F3 E4 D5 C6 B7 A8
-P09,6,A1 B1 C1 D1 E1 F1
-P10,6,A1 A2 A3 A4 A5 A6
-P11,5,A1 B1 C1 D1 E1
-P12,5,A1 A2 A3 A4 A5
-P13,4,A1 B1 C1 D1
+pattern_id,k,entries_per_stage,coords
+P14,4,81,A1 A2 A3 A4
+P01,10,59049,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
+P02,10,59049,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
+P03,10,59049,A1 B1 A2 B2 C1 D1 C2 D2 E1 F1
+P04,10,59049,A1 B2 C3 D4 E5 F6 G7 H8 A2 B3
+P05,8,6561,A1 B1 C1 D1 E1 F1 G1 H1
+P06,8,6561,A1 A2 A3 A4 A5 A6 A7 A8
+P07,8,6561,A1 B2 C3 D4 E5 F6 G7 H8
+P08,8,6561,H1 G2 F3 E4 D5 C6 B7 A8
+P09,6,729,A1 B1 C1 D1 E1 F1
+P10,6,729,A1 A2 A3 A4 A5 A6
+P11,5,243,A1 B1 C1 D1 E1
+P12,5,243,A1 A2 A3 A4 A5
+P13,4,81,A1 B1 C1 D1
 ";
 
         let temp_dir = std::env::temp_dir();
@@ -977,20 +990,20 @@ P13,4,A1 B1 C1 D1
         // Requirement 6.4: パターン数が14個であることを確認
         // 13個のパターン（14未満）
         let csv_content_13 = "\
-id,k,positions
-P01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
-P02,10,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
-P03,10,A1 B1 A2 B2 C1 D1 C2 D2 E1 F1
-P04,10,A1 B2 C3 D4 E5 F6 G7 H8 A2 B3
-P05,8,A1 B1 C1 D1 E1 F1 G1 H1
-P06,8,A1 A2 A3 A4 A5 A6 A7 A8
-P07,8,A1 B2 C3 D4 E5 F6 G7 H8
-P08,8,H1 G2 F3 E4 D5 C6 B7 A8
-P09,6,A1 B1 C1 D1 E1 F1
-P10,6,A1 A2 A3 A4 A5 A6
-P11,5,A1 B1 C1 D1 E1
-P12,5,A1 A2 A3 A4 A5
-P13,4,A1 B1 C1 D1
+pattern_id,k,entries_per_stage,coords
+P01,10,59049,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
+P02,10,59049,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
+P03,10,59049,A1 B1 A2 B2 C1 D1 C2 D2 E1 F1
+P04,10,59049,A1 B2 C3 D4 E5 F6 G7 H8 A2 B3
+P05,8,6561,A1 B1 C1 D1 E1 F1 G1 H1
+P06,8,6561,A1 A2 A3 A4 A5 A6 A7 A8
+P07,8,6561,A1 B2 C3 D4 E5 F6 G7 H8
+P08,8,6561,H1 G2 F3 E4 D5 C6 B7 A8
+P09,6,729,A1 B1 C1 D1 E1 F1
+P10,6,729,A1 A2 A3 A4 A5 A6
+P11,5,243,A1 B1 C1 D1 E1
+P12,5,243,A1 A2 A3 A4 A5
+P13,4,81,A1 B1 C1 D1
 ";
 
         let temp_dir = std::env::temp_dir();
@@ -1011,22 +1024,22 @@ P13,4,A1 B1 C1 D1
 
         // 15個のパターン（14超過）
         let csv_content_15 = "\
-id,k,positions
-P01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
-P02,10,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
-P03,10,A1 B1 A2 B2 C1 D1 C2 D2 E1 F1
-P04,10,A1 B2 C3 D4 E5 F6 G7 H8 A2 B3
-P05,8,A1 B1 C1 D1 E1 F1 G1 H1
-P06,8,A1 A2 A3 A4 A5 A6 A7 A8
-P07,8,A1 B2 C3 D4 E5 F6 G7 H8
-P08,8,H1 G2 F3 E4 D5 C6 B7 A8
-P09,6,A1 B1 C1 D1 E1 F1
-P10,6,A1 A2 A3 A4 A5 A6
-P11,5,A1 B1 C1 D1 E1
-P12,5,A1 A2 A3 A4 A5
-P13,4,A1 B1 C1 D1
-P14,4,A1 A2 A3 A4
-P15,4,B1 B2 B3 B4
+pattern_id,k,entries_per_stage,coords
+P01,10,59049,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
+P02,10,59049,A1 A2 A3 A4 A5 A6 A7 A8 B1 B2
+P03,10,59049,A1 B1 A2 B2 C1 D1 C2 D2 E1 F1
+P04,10,59049,A1 B2 C3 D4 E5 F6 G7 H8 A2 B3
+P05,8,6561,A1 B1 C1 D1 E1 F1 G1 H1
+P06,8,6561,A1 A2 A3 A4 A5 A6 A7 A8
+P07,8,6561,A1 B2 C3 D4 E5 F6 G7 H8
+P08,8,6561,H1 G2 F3 E4 D5 C6 B7 A8
+P09,6,729,A1 B1 C1 D1 E1 F1
+P10,6,729,A1 A2 A3 A4 A5 A6
+P11,5,243,A1 B1 C1 D1 E1
+P12,5,243,A1 A2 A3 A4 A5
+P13,4,81,A1 B1 C1 D1
+P14,4,81,A1 A2 A3 A4
+P15,4,81,B1 B2 B3 B4
 ";
 
         let temp_file = temp_dir.join("test_patterns_15.csv");
@@ -1122,8 +1135,8 @@ P01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
 
         // 不正なID形式
         let csv_bad_id = "\
-id,k,positions
-X01,10,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
+pattern_id,k,entries_per_stage,coords
+X01,10,59049,A1 B1 C1 D1 E1 F1 G1 H1 A2 B2
 ";
 
         let temp_file = temp_dir.join("test_bad_id.csv");
