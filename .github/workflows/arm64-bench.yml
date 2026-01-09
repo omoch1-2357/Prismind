@@ -187,7 +187,7 @@ jobs:
 
       # Upload Criterion HTML reports as artifacts
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: arm64-benchmark-results
@@ -402,7 +402,7 @@ jobs:
 
       # Upload Criterion HTML reports as artifacts
       - name: Upload evaluation benchmark results
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: arm64-eval-benchmark-results
@@ -497,7 +497,7 @@ jobs:
             cargo bench --bench rotation_bench -- rotate_180_1000_iters --verbose
 
       - name: Upload x86-64 benchmark results
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: x86-64-benchmark-results
