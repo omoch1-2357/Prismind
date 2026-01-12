@@ -24,7 +24,7 @@ pyo3 = { version = "0.24", features = ["extension-module", "abi3-py38"], optiona
 numpy = { version = "0.24", optional = true }     # NumPy array support for Python (Req 1.9)
 crc32fast = "1.4"         # CRC32 checksum for checkpoint integrity (Req 3.7)
 flate2 = "1.1"            # Optional checkpoint compression (Req 3.9)
-serde_json = "1.0.148"
+serde_json = "1.0.149"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
