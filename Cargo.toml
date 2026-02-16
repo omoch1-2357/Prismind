@@ -14,7 +14,7 @@ rayon = "1.10"            # Parallel game execution (Req 13.8)
 chrono = "0.4"            # Timestamp handling (Req 7.6)
 log = "0.4"               # Training statistics logging (Req 7.6)
 env_logger = "0.11"       # Logger implementation (Req 7.6)
-ctrlc = "3.4"             # Graceful shutdown signal handling (Req 12.7)
+ctrlc = "3.5"             # Graceful shutdown signal handling (Req 12.7)
 rand = "0.9.2"            # Epsilon-greedy exploration (promoted from dev-dependency)
 mimalloc = { version = "0.1.48", default-features = false }
 rustc-hash = "2.1.1"
@@ -24,7 +24,7 @@ pyo3 = { version = "0.24", features = ["extension-module", "abi3-py38"], optiona
 numpy = { version = "0.24", optional = true }     # NumPy array support for Python (Req 1.9)
 crc32fast = "1.4"         # CRC32 checksum for checkpoint integrity (Req 3.7)
 flate2 = "1.1"            # Optional checkpoint compression (Req 3.9)
-serde_json = "1.0.148"
+serde_json = "1.0.149"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
